@@ -141,24 +141,34 @@ describe('CLI Integration & Behaviors (src/cli.js)', () => {
     assert.ok(verifyMock.getStderr().includes('Missing required argument <id>'));
   });
 
-  test('Phase 1 unimplemented commands return exit code 1 with explicit message', async () => {
-    // rewind run npm test
-    const runMock = createMockIO();
-    const runCode = await runCLI(['run', 'npm', 'test'], runMock.io);
-    assert.equal(runCode, ExitCodes.FAILURE);
-    assert.ok(runMock.getStderr().includes('not yet implemented in Phase 1'));
+  test('rewind run propagates exit code 0 for successful command', async () => {
+    const { io, getStdout, getStderr } = createMockIO();
+    const exitCode = await runCLI(['run', process.execPath, '-e', 'console.log("pass")'], io);
 
-    // rewind history
-    const histMock = createMockIO();
-    const histCode = await runCLI(['history'], histMock.io);
-    assert.equal(histCode, ExitCodes.FAILURE);
-    assert.ok(histMock.getStderr().includes('not yet implemented in Phase 1'));
+    assert.equal(exitCode, 0);
+    assert.ok(getStdout().includes('pass'));
+    assert.equal(getStderr(), '');
+  });
 
-    // rewind show 42
-    const showMock = createMockIO();
-    const showCode = await runCLI(['show', '42'], showMock.io);
-    assert.equal(showCode, ExitCodes.FAILURE);
-    assert.ok(showMock.getStderr().includes('not yet implemented in Phase 1'));
+  test('rewind run propagates non-zero exit code for failing command', async () => {
+    const { io, getStdout, getStderr } = createMockIO();
+    const exitCode = await runCLI(['run', process.execPath, '-e', 'console.error("fail"); process.exit(19)'], io);
+
+    assert.equal(exitCode, 19);
+    assert.ok(getStderr().includes('fail'));
+  });
+
+  test('rewind run --json outputs full capture record in machine-readable JSON', async () => {
+    const { io, getStdout } = createMockIO();
+    const exitCode = await runCLI(['--json', 'run', process.execPath, '-e', 'console.log("captured in json")'], io);
+
+    assert.equal(exitCode, 0);
+    const parsed = JSON.parse(getStdout().trim());
+    assert.equal(parsed.status, 'success');
+    assert.equal(parsed.data.exitCode, 0);
+    assert.ok(parsed.data.stdout.includes('captured in json'));
+    assert.ok(parsed.data.git);
+    assert.ok(parsed.data.environment);
   });
 
   test('JSON error mode formats error payload as valid JSON on stdout', async () => {

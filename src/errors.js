@@ -3,11 +3,15 @@
  * 0 = Success
  * 1 = General operational / runtime error or not-implemented status
  * 2 = CLI usage error (invalid command, missing argument, unknown flag)
+ * 126 = Command cannot execute / internal invocation failure
+ * 127 = Command not found / failed to spawn target binary
  */
 export const ExitCodes = Object.freeze({
   SUCCESS: 0,
   FAILURE: 1,
-  USAGE_ERROR: 2
+  USAGE_ERROR: 2,
+  INTERNAL_ERROR: 126,
+  SPAWN_ERROR: 127
 });
 
 /**
@@ -80,6 +84,16 @@ export class InvalidArgumentError extends UsageError {
     super(message, details);
     this.name = 'InvalidArgumentError';
     this.code = 'ERR_INVALID_ARGUMENT';
+  }
+}
+
+/**
+ * Thrown when a command fails to spawn or execute (Exit Code 127).
+ */
+export class SpawnError extends CliError {
+  constructor(message, details = {}) {
+    super(message, { exitCode: ExitCodes.SPAWN_ERROR, code: 'ERR_SPAWN', details });
+    this.name = 'SpawnError';
   }
 }
 
