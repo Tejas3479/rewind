@@ -1,0 +1,93 @@
+# Standard Library Replacements (`STDLIB.md`)
+
+This document details every third-party package normally used for these features alongside the exact Node.js standard library capability Rewind implemented in its place.
+
+---
+
+### 1. CLI Argument & Flag Parsing
+
+* **Normally:** `commander`, `yargs`, or `minimist`
+* **Rewind uses:** Hand-written zero-dependency tokenizer and parser using standard JavaScript array traversal.
+* **Why:** Eliminates runtime CLI dependencies while supporting command routing, positional arguments, short/long flags (`-h`, `--help`, `-n`, `--limit`), `--root`, and trailing argument preservation for `rewind run <command...>`.
+* **Actual Code Location:** [`src/parser.js`](./src/parser.js)
+
+---
+
+### 2. Terminal Styling & Color Support
+
+* **Normally:** `chalk`, `picocolors`, or `kleur`
+* **Rewind uses:** Native ANSI SGR escape sequences with conditional formatting driven by `process.env.NO_COLOR` and `stream.isTTY`.
+* **Why:** Provides clear visual hierarchy (badges, bold, dim, cyan, green, yellow, red) with strict compliance with the [`NO_COLOR` standard](https://no-color.org) and automatic plain-text fallback in CI/piped environments.
+* **Actual Code Location:** [`src/formatter.js`](./src/formatter.js)
+
+---
+
+### 3. UUID Generation
+
+* **Normally:** `uuid` npm package
+* **Rewind uses:** `node:crypto.randomUUID()`
+* **Why:** Generates cryptographically secure, collision-free UUIDs for atomic write temp files and quarantine records without external dependencies.
+* **Actual Code Location:** [`src/storage/store.js`](./src/storage/store.js)
+
+---
+
+### 4. Deterministic SHA-256 Hashing
+
+* **Normally:** `crypto-js`, `sha.js`, or `hasha`
+* **Rewind uses:** `node:crypto.createHash('sha256')`
+* **Why:** Fast, hardware-accelerated, collision-resistant calculation of reproducible 16-character hexadecimal failure fingerprints from canonical error signatures.
+* **Actual Code Location:** [`src/storage/fingerprint.js`](./src/storage/fingerprint.js)
+
+---
+
+### 5. Child Process Execution & Live Streaming
+
+* **Normally:** `execa`, `cross-spawn`, or `shelljs`
+* **Rewind uses:** `node:child_process.spawn`
+* **Why:** Provides direct process execution, real-time live output piping, high-resolution execution timing via `process.hrtime.bigint()`, accurate exit code and signal capture, and 10MB memory safety bounding.
+* **Actual Code Location:** [`src/capture.js`](./src/capture.js)
+
+---
+
+### 6. ANSI Escape Stripping & Output Sanitization
+
+* **Normally:** `strip-ansi` or `ansi-regex`
+* **Rewind uses:** Standard ECMAScript RegExp patterns covering CSI, OSC, DCS, APC, PM sequences, and non-printable control characters.
+* **Why:** Strips malicious terminal injection sequences, OSC hyperlinks, and cursor jumps before storing logs and displaying forensic output.
+* **Actual Code Location:** [`src/sanitizer.js`](./src/sanitizer.js)
+
+---
+
+### 7. Git Metadata Inspection
+
+* **Normally:** `simple-git`, `isomorphic-git`, or invoking the `git` binary via CLI
+* **Rewind uses:** Pure `node:fs` and `node:path` filesystem reading of `.git/HEAD`, loose refs (`.git/refs/heads/*`), and `packed-refs`.
+* **Why:** Eliminates external runtime binary dependencies and network calls. Rewind captures commit SHAs, active branches, and detached HEAD status directly from disk without spawning `git`.
+* **Actual Code Location:** [`src/git.js`](./src/git.js)
+
+---
+
+### 8. Storage Engine & Database
+
+* **Normally:** `sqlite3`, `better-sqlite3`, `level`, or `lowdb`
+* **Rewind uses:** Directory-based immutable JSON records in `.rewind/records/<id>.json` managed with crash-safe atomic writes (`write tmp` $\rightarrow$ `fsyncSync` $\rightarrow$ atomic `renameSync`).
+* **Why:** Provides a transparent, inspectable, human-readable local ledger that requires zero C++ native addons or external database server processes. Corrupt records are isolated into `.rewind/quarantine/` with automatic startup index rebuilds.
+* **Actual Code Location:** [`src/storage/store.js`](./src/storage/store.js)
+
+---
+
+### 9. Similarity Scoring & Near-Match Search
+
+* **Normally:** `string-similarity`, `fuse.js`, `faiss`, or external Vector DB APIs
+* **Rewind uses:** Multi-tier deterministic scoring model computing exact fingerprint lookups, token recall, and Jaccard set overlap: $\frac{|Q \cap E|}{|Q \cup E|}$.
+* **Why:** Fast, fully offline, transparent, and reproducible search over historical failures without heavy embeddings, remote AI dependencies, or non-deterministic vector models.
+* **Actual Code Location:** [`src/storage/search.js`](./src/storage/search.js)
+
+---
+
+### 10. Automated Testing Framework
+
+* **Normally:** `jest`, `mocha`, `vitest`, or `chai`
+* **Rewind uses:** Native Node.js test runner (`node:test`) and assertion module (`node:assert/strict`).
+* **Why:** Comprehensive unit, integration, and security testing (117 test cases across 15 test suites) executed directly with `node --test` without installing any test framework dependencies.
+* **Actual Code Location:** [`test/*.test.js`](./test/)
