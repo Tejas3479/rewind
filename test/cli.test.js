@@ -173,14 +173,14 @@ describe('CLI Integration & Behaviors (src/cli.js)', () => {
 
   test('JSON error mode formats error payload as valid JSON on stdout', async () => {
     const { io, getStdout, getStderr } = createMockIO();
-    const exitCode = await runCLI(['history', '--json'], io);
+    const exitCode = await runCLI(['unknown-subcommand', '--json'], io);
 
-    assert.equal(exitCode, ExitCodes.FAILURE);
+    assert.equal(exitCode, ExitCodes.USAGE_ERROR);
     assert.equal(getStderr(), ''); // No raw text on stderr in JSON mode
     const parsed = JSON.parse(getStdout().trim());
     assert.equal(parsed.status, 'error');
-    assert.equal(parsed.error.code, 'ERR_NOT_IMPLEMENTED');
-    assert.equal(parsed.error.exitCode, ExitCodes.FAILURE);
+    assert.equal(parsed.error.code, 'ERR_UNKNOWN_COMMAND');
+    assert.equal(parsed.error.exitCode, ExitCodes.USAGE_ERROR);
   });
 
   test('NO_COLOR environment variable disables ANSI escape codes in output', async () => {

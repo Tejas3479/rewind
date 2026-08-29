@@ -11,6 +11,7 @@ import { InvalidArgumentError } from './errors.js';
  * @property {boolean} flags.json - Whether --json was requested
  * @property {boolean} flags.noColor - Whether --no-color was requested
  * @property {string|null} flags.root - Custom root directory path
+ * @property {number|null} flags.limit - Limit for history listing
  * @property {string|null} flags.cause - Suspected cause text for recover command
  * @property {string|null} flags.change - Change made / remediation text for recover command
  * @property {string|null} flags.verifyCmd - Verification command string for recover command
@@ -82,6 +83,7 @@ export function parseArgs(rawArgs = []) {
     json: false,
     noColor: false,
     root: null,
+    limit: null,
     cause: null,
     change: null,
     verifyCmd: null
@@ -126,6 +128,25 @@ export function parseArgs(rawArgs = []) {
         throw new InvalidArgumentError('Option "--root" requires a path argument.');
       }
       flags.root = val;
+      i++;
+    } else if (arg === '--limit' || arg === '-n') {
+      i++;
+      if (i >= rawArgs.length || rawArgs[i].startsWith('-')) {
+        throw new InvalidArgumentError('Option "--limit" requires an integer value.');
+      }
+      const num = Number.parseInt(rawArgs[i], 10);
+      if (Number.isNaN(num) || num < 1) {
+        throw new InvalidArgumentError(`Option "--limit" requires a positive integer, got "${rawArgs[i]}".`);
+      }
+      flags.limit = num;
+      i++;
+    } else if (arg.startsWith('--limit=')) {
+      const val = arg.slice('--limit='.length);
+      const num = Number.parseInt(val, 10);
+      if (!val || Number.isNaN(num) || num < 1) {
+        throw new InvalidArgumentError(`Option "--limit" requires a positive integer, got "${val}".`);
+      }
+      flags.limit = num;
       i++;
     } else if (arg === '--cause' || arg === '-c') {
       i++;

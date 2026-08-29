@@ -163,6 +163,23 @@ export class StorageEngine {
   }
 
   /**
+   * Finds all records with an exact matching fingerprint.
+   *
+   * @param {string} fingerprint
+   * @returns {Array<import('./record.js').FailureRecord>}
+   */
+  findByFingerprint(fingerprint) {
+    if (!fingerprint) return [];
+    const matches = [];
+    for (const record of this.index.values()) {
+      if (record.fingerprint === fingerprint) {
+        matches.push(record);
+      }
+    }
+    return matches.sort((a, b) => Number(b.id) - Number(a.id));
+  }
+
+  /**
    * Searches for a prior record that reached the VERIFIED state with the same fingerprint.
    *
    * @param {string} fingerprint
