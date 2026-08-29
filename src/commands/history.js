@@ -1,49 +1,36 @@
-import { formatJson } from '../formatter.js';
+import { formatJson, formatRelativeTime, formatStatusBadge } from '../formatter.js';
 import { RecoveryStates } from '../storage/state.js';
 
 /**
- * Formats ISO timestamp for concise terminal table display.
+ * Derives a concise result summary for an incident row.
  *
- * @param {string} isoString
- * @returns {string}
- */
-function formatTimestamp(isoString) {
-  if (!isoString) return '';
-  try {
-    const d = new Date(isoString);
-    const pad = (n) => String(n).padStart(2, '0');
-    return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())} UTC`;
-  } catch {
-    return isoString;
-  }
-}
-
-/**
- * Returns colored state label.
- *
- * @param {string} status
+ * @param {import('../storage/record.js').FailureRecord} rec
  * @param {import('../formatter.js').createStyler} s
  * @returns {string}
  */
-function formatStatus(status, s) {
-  switch (status) {
-    case RecoveryStates.VERIFIED:
-      return s.green(s.bold('VERIFIED'));
-    case RecoveryStates.REGRESSED:
-      return s.red(s.bold('REGRESSED'));
-    case RecoveryStates.FIXED:
-      return s.cyan('FIXED');
-    case RecoveryStates.SUSPECTED:
-      return s.yellow('SUSPECTED');
-    case RecoveryStates.OBSERVED:
-    default:
-      return s.dim(status || 'OBSERVED');
+function getResultSummary(rec, s) {
+  if (rec.status === RecoveryStates.VERIFIED) {
+    return s.green('verified fix');
   }
+  if (rec.status === RecoveryStates.REGRESSED) {
+    return rec.regressionOf ? s.red(`matches #${rec.regressionOf}`) : s.red('regressed');
+  }
+  if (rec.status === RecoveryStates.FIXED) {
+    return s.cyan('fix recorded');
+  }
+  if (rec.status === RecoveryStates.SUSPECTED) {
+    return s.yellow('suspected');
+  }
+  if (rec.exitCode !== null && rec.exitCode !== undefined) {
+    return s.dim(`exit ${rec.exitCode}`);
+  }
+  return s.dim('failed');
 }
 
 /**
  * Handler for `rewind history [options]`.
  * Lists historical failure incidents sorted newest first, with support for --limit and --json.
+ * Uses adaptive column layout based on terminal width without external packages.
  *
  * @param {object} params
  * @param {import('../cli.js').CliContext} params.context
@@ -53,7 +40,7 @@ export async function historyCommand({ context }) {
   const { parsedArgs, storage, stdout, styler } = context;
 
   const allRecords = storage.listRecords();
-  // Sort newest first (highest ID / latest timestamp first)
+  // Sort newest first (highest ID first)
   const sorted = [...allRecords].reverse();
 
   const limit = parsedArgs.flags.limit;
@@ -69,41 +56,61 @@ export async function historyCommand({ context }) {
     return 0;
   }
 
+  const s = styler;
+
   if (records.length === 0) {
-    const tag = styler.badge('rewind', styler.yellow);
-    stdout.write(`${tag} No recorded incidents in ledger.\nRun "${styler.cyan('rewind run <command...>')}" to start capturing failures.\n`);
+    const tag = s.badge('rewind', s.yellow);
+    stdout.write(`\n${tag} No recorded incidents in ledger.\n`);
+    stdout.write(`Run "${s.cyan('rewind run <command...>')}" to start capturing failures.\n\n`);
     return 0;
   }
 
-  // Column headers
-  const headerId = 'ID'.padEnd(6);
-  const headerFp = 'FINGERPRINT'.padEnd(14);
-  const headerStatus = 'STATUS'.padEnd(14);
-  const headerCode = 'EXIT'.padEnd(6);
-  const headerTime = 'TIMESTAMP'.padEnd(24);
-  const headerCmd = 'COMMAND';
+  const termWidth = (stdout && typeof stdout.columns === 'number' && stdout.columns > 20)
+    ? stdout.columns
+    : 80;
 
-  stdout.write(styler.bold(`${headerId} ${headerFp} ${headerStatus} ${headerCode} ${headerTime} ${headerCmd}\n`));
-  stdout.write(styler.dim('─'.repeat(80) + '\n'));
+  // Fixed column widths
+  const colIdWidth = 6;
+  const colStatusWidth = 12;
+  const colTimeWidth = 11;
+  const colResultWidth = 14;
+  const spacing = 4 * 2; // 4 gutters of 2 spaces
+  const fixedWidth = colIdWidth + colStatusWidth + colTimeWidth + colResultWidth + spacing;
+  const colCmdWidth = Math.max(20, Math.min(60, termWidth - fixedWidth));
+
+  const dividerLen = Math.min(termWidth, fixedWidth + colCmdWidth);
+  const divider = s.dim('─'.repeat(dividerLen));
+
+  stdout.write(`\n${s.bold('REWIND RECOVERY LEDGER')} ${s.dim(`(${allRecords.length} total incidents)`)}\n`);
+  stdout.write(`${divider}\n`);
+
+  // Header
+  const hId = 'ID'.padEnd(colIdWidth);
+  const hStatus = 'STATUS'.padEnd(colStatusWidth);
+  const hCmd = 'COMMAND'.padEnd(colCmdWidth);
+  const hTime = 'TIME'.padEnd(colTimeWidth);
+  const hResult = 'RESULT';
+
+  stdout.write(`${s.dim(hId)}  ${s.dim(hStatus)}  ${s.dim(hCmd)}  ${s.dim(hTime)}  ${s.dim(hResult)}\n`);
+  stdout.write(`${divider}\n`);
 
   for (const rec of records) {
-    const idStr = `#${rec.id}`.padEnd(6);
-    const fpStr = (rec.fingerprint ? rec.fingerprint.slice(0, 12) : '────────────').padEnd(14);
-    const statusStr = rec.status.padEnd(14);
-    const codeStr = String(rec.exitCode ?? '─').padEnd(6);
-    const timeStr = formatTimestamp(rec.startTime).padEnd(24);
-    const cmdStr = (rec.fullCommand || `${rec.command} ${(rec.args || []).join(' ')}`).slice(0, 36);
+    const idText = `#${rec.id}`.padEnd(colIdWidth);
+    const rawCmd = rec.fullCommand || `${rec.command} ${(rec.args || []).join(' ')}`.trim();
+    const cmdTruncated = rawCmd.length > colCmdWidth
+      ? rawCmd.slice(0, colCmdWidth - 3) + '...'
+      : rawCmd.padEnd(colCmdWidth);
 
-    const formattedStatus = formatStatus(rec.status, styler);
+    const relTime = formatRelativeTime(rec.startTime).padEnd(colTimeWidth);
+    const badge = formatStatusBadge(rec.status, s);
+    const statusPadding = ' '.repeat(Math.max(0, colStatusWidth - rec.status.length));
+    const resultSummary = getResultSummary(rec, s);
 
-    // Padding adjustment for colored status
-    const statusCol = rec.status.length < 14 ? formattedStatus + ' '.repeat(14 - rec.status.length) : formattedStatus;
-
-    stdout.write(`${styler.bold(idStr)} ${styler.cyan(fpStr)} ${statusCol} ${codeStr} ${styler.dim(timeStr)} ${cmdStr}\n`);
+    stdout.write(`${s.bold(idText)}  ${badge}${statusPadding}  ${cmdTruncated}  ${s.dim(relTime)}  ${resultSummary}\n`);
   }
 
-  stdout.write(styler.dim('─'.repeat(80) + '\n'));
-  stdout.write(`${styler.dim(`Showing ${records.length} of ${allRecords.length} incident(s). Run "${styler.cyan('rewind show <id>')}" to inspect full details.`)}\n`);
+  stdout.write(`${divider}\n`);
+  stdout.write(`${s.dim(`Showing ${records.length} of ${allRecords.length} incident(s). Run "${s.cyan('rewind show <id>')}" to inspect full forensic details.`)}\n\n`);
 
   return 0;
 }

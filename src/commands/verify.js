@@ -2,7 +2,8 @@ import { MissingArgumentError, CliError, UsageError } from '../errors.js';
 import { RecoveryStates, assertValidTransition } from '../storage/state.js';
 import { executeAndCapture } from '../capture.js';
 import { tokenizeCommandLine } from '../parser.js';
-import { formatJson } from '../formatter.js';
+import { formatJson, formatBox } from '../formatter.js';
+import { sanitizeForDisplay } from '../sanitizer.js';
 
 /**
  * Handler for `rewind verify <id>`.
@@ -23,7 +24,11 @@ export async function verifyCommand({ context }) {
 
   const record = storage.getRecord(id);
   if (!record) {
-    throw new CliError(`Incident #${id} not found in ledger.`, { code: 'ERR_NOT_FOUND', exitCode: 1 });
+    throw new CliError(`Incident #${id} not found in ledger.`, {
+      code: 'ERR_NOT_FOUND',
+      exitCode: 1,
+      details: { id, suggestion: 'Run "rewind history" to browse all past incidents.' }
+    });
   }
 
   if (record.status === RecoveryStates.VERIFIED) {
@@ -53,7 +58,7 @@ export async function verifyCommand({ context }) {
   if (!isJsonMode) {
     const tag = styler.badge('rewind:verify', styler.cyan);
     stdout.write(`\n${tag} Executing user-approved verification command for Incident #${id}:\n`);
-    stdout.write(`  ${styler.bold(styler.cyan('$ ' + verifyCmd))}\n\n`);
+    stdout.write(`  ${styler.bold(styler.cyan('$ ' + sanitizeForDisplay(verifyCmd)))}\n\n`);
   }
 
   // Execute ONLY the explicitly stored verification command
@@ -72,11 +77,12 @@ export async function verifyCommand({ context }) {
     // Assert and transition state to VERIFIED
     assertValidTransition(record.status, RecoveryStates.VERIFIED, id);
 
+    const verifiedAtIso = new Date().toISOString();
     const updated = storage.updateRecord(id, (current) => ({
       ...current,
       status: RecoveryStates.VERIFIED,
       verification: {
-        verifiedAt: new Date().toISOString(),
+        verifiedAt: verifiedAtIso,
         command: verifyCmd,
         exitCode: 0,
         durationMs: verifyResult.durationMs,
@@ -95,7 +101,17 @@ export async function verifyCommand({ context }) {
 
     const tag = styler.badge('rewind', styler.green);
     stdout.write(`\n${tag} ${styler.bold(styler.green('VERIFIED!'))} Incident #${id} successfully validated under recorded conditions.\n`);
+
+    const box = formatBox('✓ RECOVERY VERIFIED', [
+      { label: 'Incident', value: `#${id}` },
+      { label: 'Verify Command', value: verifyCmd },
+      { label: 'Exit Code', value: '0 (Success)' },
+      { label: 'Verified At', value: verifiedAtIso }
+    ], styler, 'success');
+
+    stdout.write(`\n${box}\n\n`);
     stdout.write(`The verified recovery has been sealed into the ledger.\n`);
+    stdout.write(`Future occurrences of this failure fingerprint will detect this verified fix.\n\n`);
     return 0;
   } else {
     // Record failed verification attempt without promoting state
@@ -122,6 +138,16 @@ export async function verifyCommand({ context }) {
 
     const tag = styler.badge('rewind', styler.red);
     stderr.write(`\n${tag} ${styler.bold(styler.red('NOT VERIFIED:'))} Verification command failed with exit code ${verifyResult.exitCode}.\n`);
+
+    const box = formatBox('✗ VERIFICATION FAILED', [
+      { label: 'Incident', value: `#${id}` },
+      { label: 'Verify Command', value: verifyCmd },
+      { label: 'Exit Code', value: String(verifyResult.exitCode ?? 1) }
+    ], styler, 'error');
+
+    stderr.write(`\n${box}\n\n`);
+    stderr.write(`Verification command failed with exit code ${verifyResult.exitCode}.\n`);
+    stderr.write(`Incident #${id} remains in state: ${styler.cyan('FIXED')}. Review the error and adjust your fix.\n\n`);
     return verifyResult.exitCode || 1;
   }
 }

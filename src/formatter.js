@@ -1,6 +1,6 @@
 /**
  * Formatter handles terminal color styling, TTY detection, NO_COLOR compliance,
- * and JSON serialization.
+ * relative time formatting, semantic status badges, and JSON serialization.
  */
 
 /**
@@ -19,9 +19,7 @@ const ANSI_CODES = {
   magenta: '\x1b[35m',
   cyan: '\x1b[36m',
   white: '\x1b[37m',
-  gray: '\x1b[90m',
-  bgRed: '\x1b[41m',
-  bgGreen: '\x1b[42m'
+  gray: '\x1b[90m'
 };
 
 /**
@@ -83,8 +81,114 @@ export function createStyler(enabled) {
     cyan: (text) => style(ANSI_CODES.cyan, text),
     white: (text) => style(ANSI_CODES.white, text),
     gray: (text) => style(ANSI_CODES.gray, text),
-    badge: (label, colorFn) => style(ANSI_CODES.bold, `[${label}]`)
+    badge: (label, colorFn) => {
+      const fn = colorFn || ((t) => style(ANSI_CODES.bold, t));
+      return fn(`[${label}]`);
+    }
   };
+}
+
+/**
+ * Formats an ISO date string into human-friendly relative time (e.g. '2m ago', '3h ago', '1d ago').
+ *
+ * @param {string} isoString
+ * @param {Date} [now=new Date()]
+ * @returns {string}
+ */
+export function formatRelativeTime(isoString, now = new Date()) {
+  if (!isoString) return 'unknown';
+  try {
+    const date = new Date(isoString);
+    const diffMs = now.getTime() - date.getTime();
+    if (Number.isNaN(diffMs)) return isoString;
+
+    const diffSec = Math.floor(diffMs / 1000);
+    if (diffSec < 45) return 'just now';
+    if (diffSec < 90) return '1m ago';
+
+    const diffMin = Math.floor(diffSec / 60);
+    if (diffMin < 60) return `${diffMin}m ago`;
+
+    const diffHours = Math.floor(diffMin / 60);
+    if (diffHours < 24) return `${diffHours}h ago`;
+
+    const diffDays = Math.floor(diffHours / 24);
+    if (diffDays < 30) return `${diffDays}d ago`;
+
+    const diffMonths = Math.floor(diffDays / 30);
+    if (diffMonths < 12) return `${diffMonths}mo ago`;
+
+    const diffYears = Math.floor(diffDays / 365);
+    return `${diffYears}y ago`;
+  } catch {
+    return isoString;
+  }
+}
+
+/**
+ * Formats semantic state label with appropriate terminal emphasis.
+ *
+ * @param {string} status
+ * @param {ReturnType<createStyler>} styler
+ * @returns {string}
+ */
+export function formatStatusBadge(status, styler) {
+  const s = styler;
+  switch (status) {
+    case 'VERIFIED':
+      return s.green(s.bold('VERIFIED'));
+    case 'REGRESSED':
+      return s.red(s.bold('REGRESSED'));
+    case 'FIXED':
+      return s.cyan(s.bold('FIXED'));
+    case 'SUSPECTED':
+      return s.yellow(s.bold('SUSPECTED'));
+    case 'OBSERVED':
+    default:
+      return s.dim(status || 'OBSERVED');
+  }
+}
+
+/**
+ * Formats a clean boxed notification for major state milestones (verification, regressions).
+ *
+ * @param {string} title
+ * @param {Array<{ label: string, value: string }>} fields
+ * @param {ReturnType<createStyler>} styler
+ * @param {'success'|'error'|'warning'|'info'} [tone='info']
+ * @returns {string}
+ */
+export function formatBox(title, fields, styler, tone = 'info') {
+  const s = styler;
+  const width = 64;
+
+  const topBorder = `┌${'─'.repeat(width - 2)}┐`;
+  const bottomBorder = `└${'─'.repeat(width - 2)}┘`;
+
+  const coloredTitle = tone === 'success'
+    ? s.green(s.bold(title))
+    : tone === 'error' || tone === 'warning'
+      ? s.red(s.bold(title))
+      : s.bold(title);
+
+  const lines = [
+    topBorder,
+    `│ ${coloredTitle}${' '.repeat(Math.max(0, width - 4 - title.length))} │`,
+    `│${' '.repeat(width - 2)}│`
+  ];
+
+  for (const field of fields) {
+    const rawLabel = `${field.label}:`;
+    const labelStr = s.dim(rawLabel.padEnd(22));
+    const valStr = field.value;
+    const contentLen = rawLabel.padEnd(22).length + 1 + valStr.length;
+    const padding = Math.max(0, width - 4 - contentLen);
+
+    lines.push(`│ ${labelStr} ${valStr}${' '.repeat(padding)} │`);
+  }
+
+  lines.push(bottomBorder);
+  return lines.join('\n');
 }
 
 /**
@@ -98,14 +202,15 @@ export function formatJson(data) {
 }
 
 /**
- * Formats an error for console output.
+ * Formats an error with structured diagnosis and remediation suggestion.
  *
  * @param {Error|unknown} err
  * @param {ReturnType<createStyler>} styler
  * @returns {string}
  */
 export function formatError(err, styler) {
-  const prefix = styler.red(styler.bold('error:'));
+  const s = styler;
+  const prefix = s.red(s.bold('error:'));
   const message = err instanceof Error ? err.message : String(err);
   return `${prefix} ${message}`;
 }

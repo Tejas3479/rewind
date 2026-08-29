@@ -2,7 +2,15 @@ export { runCLI } from './cli.js';
 export { parseArgs, tokenizeCommandLine } from './parser.js';
 export { dispatch, COMMANDS } from './router.js';
 export { resolveConfig, findProjectRoot, VERSION, DEFAULT_LEDGER_DIR } from './config.js';
-export { createStyler, shouldEnableColor, formatError, formatJson } from './formatter.js';
+export {
+  createStyler,
+  shouldEnableColor,
+  formatError,
+  formatJson,
+  formatRelativeTime,
+  formatStatusBadge,
+  formatBox
+} from './formatter.js';
 export { executeAndCapture, MAX_BUFFER_BYTES } from './capture.js';
 export { readGitMetadata, findGitDir } from './git.js';
 export { captureSafeEnvironment, SAFE_VALUE_ALLOWLIST } from './environment.js';

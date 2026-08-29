@@ -1,35 +1,28 @@
 import { MissingArgumentError, CliError } from '../errors.js';
-import { formatJson } from '../formatter.js';
+import { formatJson, formatStatusBadge } from '../formatter.js';
 import { RecoveryStates } from '../storage/state.js';
 import { sanitizeForDisplay } from '../sanitizer.js';
 
 /**
- * Returns colored state label.
+ * Formats full UTC timestamp.
  *
- * @param {string} status
- * @param {import('../formatter.js').createStyler} s
+ * @param {string} isoString
  * @returns {string}
  */
-function formatStatus(status, s) {
-  switch (status) {
-    case RecoveryStates.VERIFIED:
-      return s.green(s.bold('VERIFIED'));
-    case RecoveryStates.REGRESSED:
-      return s.red(s.bold('REGRESSED'));
-    case RecoveryStates.FIXED:
-      return s.cyan(s.bold('FIXED'));
-    case RecoveryStates.SUSPECTED:
-      return s.yellow(s.bold('SUSPECTED'));
-    case RecoveryStates.OBSERVED:
-    default:
-      return s.dim(status || 'OBSERVED');
+function formatUtc(isoString) {
+  if (!isoString) return 'unknown';
+  try {
+    const d = new Date(isoString);
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())} UTC`;
+  } catch {
+    return isoString;
   }
 }
 
 /**
  * Handler for `rewind show <id> [options]`.
- * Displays complete inspectable record for a given incident ID.
- * Untrusted evidence is sanitized for display to prevent ANSI injection and secret leakage.
+ * Displays complete inspectable forensic record with clear visual hierarchy.
  *
  * @param {object} params
  * @param {import('../cli.js').CliContext} params.context
@@ -45,7 +38,11 @@ export async function showCommand({ context }) {
 
   const record = storage.getRecord(id);
   if (!record) {
-    throw new CliError(`Incident #${id} not found in ledger.`, { code: 'ERR_NOT_FOUND', exitCode: 1 });
+    throw new CliError(`Incident #${id} not found in ledger.`, {
+      code: 'ERR_NOT_FOUND',
+      exitCode: 1,
+      details: { id, suggestion: 'Run "rewind history" to browse all past incidents.' }
+    });
   }
 
   if (parsedArgs.flags.json) {
@@ -57,24 +54,27 @@ export async function showCommand({ context }) {
   }
 
   const s = styler;
-  const divider = s.dim('─'.repeat(80));
+  const termWidth = (stdout && typeof stdout.columns === 'number' && stdout.columns > 20)
+    ? Math.min(stdout.columns, 80)
+    : 80;
+  const divider = s.dim('─'.repeat(termWidth));
 
-  stdout.write(`\n${s.bold(`INCIDENT #${record.id}`)} — ${formatStatus(record.status, s)}\n`);
+  stdout.write(`\n${s.bold(`INCIDENT #${record.id}`)}  ${formatStatusBadge(record.status, s)}\n`);
   stdout.write(`${divider}\n`);
 
   // Section 1: Execution Details
   stdout.write(`${s.bold('EXECUTION:')}\n`);
   stdout.write(`  ${s.dim('Command:')}      ${s.cyan(record.fullCommand || `${record.command} ${(record.args || []).join(' ')}`)}\n`);
   stdout.write(`  ${s.dim('Exit Code:')}    ${record.exitCode !== null ? s.bold(String(record.exitCode)) : s.dim('null')}${record.signal ? ` (Signal: ${record.signal})` : ''}\n`);
-  stdout.write(`  ${s.dim('Working Dir:')}  ${record.cwd}\n`);
-  stdout.write(`  ${s.dim('Started At:')}   ${record.startTime}\n`);
   stdout.write(`  ${s.dim('Duration:')}     ${record.durationMs}ms\n`);
+  stdout.write(`  ${s.dim('Started At:')}   ${formatUtc(record.startTime)}\n`);
+  stdout.write(`  ${s.dim('Working Dir:')}  ${record.cwd}\n`);
   if (record.regressionOf) {
     stdout.write(`  ${s.dim('Regression Of:')} ${s.red(s.bold(`Incident #${record.regressionOf}`))}\n`);
   }
   stdout.write('\n');
 
-  // Section 2: Fingerprint & Normalized Signature
+  // Section 2: Failure Memory & Fingerprint
   stdout.write(`${s.bold('FAILURE MEMORY:')}\n`);
   stdout.write(`  ${s.dim('Fingerprint:')}   ${s.cyan(record.fingerprint || 'none')}\n`);
   if (record.normalizedError) {
@@ -85,8 +85,8 @@ export async function showCommand({ context }) {
   }
   stdout.write('\n');
 
-  // Section 3: Diagnostic Evidence Output (Sanitized for Terminal Safety)
-  if (record.stderr) {
+  // Section 3: Captured Stderr & Stdout Evidence
+  if (record.stderr && record.stderr.trim()) {
     stdout.write(`${s.bold('CAPTURED STDERR:')}\n`);
     const cleanStderr = sanitizeForDisplay(record.stderr);
     const errLines = cleanStderr.split('\n').map((l) => `  ${l}`).join('\n');
@@ -100,7 +100,7 @@ export async function showCommand({ context }) {
     stdout.write(`${outLines}\n\n`);
   }
 
-  // Section 4: Repository & Environment Metadata
+  // Section 4: Environment & Repository Metadata
   stdout.write(`${s.bold('ENVIRONMENT & REPOSITORY:')}\n`);
   if (record.git && record.git.isGit) {
     stdout.write(`  ${s.dim('Git Branch:')}   ${record.git.branch || s.dim('detached')} (${record.git.headCommit ? record.git.headCommit.slice(0, 10) : 'none'})\n`);
@@ -111,12 +111,12 @@ export async function showCommand({ context }) {
   }
   stdout.write('\n');
 
-  // Section 5: Remediation & Verification History
+  // Section 5: Recovery History
   if (Array.isArray(record.recoveries) && record.recoveries.length > 0) {
     stdout.write(`${s.bold('RECOVERY ATTEMPTS:')}\n`);
     for (let i = 0; i < record.recoveries.length; i++) {
       const rec = record.recoveries[i];
-      stdout.write(`  ${s.bold(`[Attempt #${i + 1}]`)} ${s.dim(`(${rec.timestamp})`)}\n`);
+      stdout.write(`  ${s.bold(`[Attempt #${i + 1}]`)} ${s.dim(`(${formatUtc(rec.timestamp)})`)}\n`);
       if (rec.cause) stdout.write(`    ${s.dim('Cause:')}   ${sanitizeForDisplay(rec.cause)}\n`);
       if (rec.change) stdout.write(`    ${s.dim('Change:')}  ${sanitizeForDisplay(rec.change)}\n`);
       if (rec.verifyCmd) stdout.write(`    ${s.dim('Verify:')}  ${s.cyan(sanitizeForDisplay(rec.verifyCmd))}\n`);
@@ -127,11 +127,14 @@ export async function showCommand({ context }) {
   // Section 6: Verification Record
   if (record.verification) {
     stdout.write(`${s.bold('VERIFICATION RECORD:')}\n`);
-    stdout.write(`  ${s.dim('Status:')}       ${record.status === RecoveryStates.VERIFIED ? s.green(s.bold('VERIFIED')) : s.red(s.bold('FAILED'))}\n`);
+    const verStatus = record.status === RecoveryStates.VERIFIED
+      ? s.green(s.bold('VERIFIED'))
+      : s.red(s.bold('FAILED'));
+    stdout.write(`  ${s.dim('Status:')}       ${verStatus}\n`);
     stdout.write(`  ${s.dim('Command:')}      ${s.cyan(sanitizeForDisplay(record.verification.command))}\n`);
     stdout.write(`  ${s.dim('Exit Code:')}    ${record.verification.exitCode}\n`);
     if (record.verification.verifiedAt) {
-      stdout.write(`  ${s.dim('Verified At:')}  ${record.verification.verifiedAt}\n`);
+      stdout.write(`  ${s.dim('Verified At:')}  ${formatUtc(record.verification.verifiedAt)}\n`);
     }
     stdout.write('\n');
   }

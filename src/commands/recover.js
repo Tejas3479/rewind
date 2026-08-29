@@ -1,6 +1,7 @@
 import { MissingArgumentError, CliError, UsageError } from '../errors.js';
 import { RecoveryStates, assertValidTransition } from '../storage/state.js';
-import { formatJson } from '../formatter.js';
+import { formatJson, formatStatusBadge } from '../formatter.js';
+import { sanitizeForDisplay } from '../sanitizer.js';
 
 /**
  * Handler for `rewind recover <id> [options]`.
@@ -12,7 +13,7 @@ import { formatJson } from '../formatter.js';
  * @returns {Promise<number>}
  */
 export async function recoverCommand({ context }) {
-  const { parsedArgs, storage, stdout, stderr, styler } = context;
+  const { parsedArgs, storage, stdout, styler } = context;
   const id = parsedArgs.positional[0];
 
   if (!id) {
@@ -21,7 +22,11 @@ export async function recoverCommand({ context }) {
 
   const record = storage.getRecord(id);
   if (!record) {
-    throw new CliError(`Incident #${id} not found in ledger.`, { code: 'ERR_NOT_FOUND', exitCode: 1 });
+    throw new CliError(`Incident #${id} not found in ledger.`, {
+      code: 'ERR_NOT_FOUND',
+      exitCode: 1,
+      details: { id, suggestion: 'Run "rewind history" to browse all past incidents.' }
+    });
   }
 
   const cause = parsedArgs.flags.cause;
@@ -32,7 +37,7 @@ export async function recoverCommand({ context }) {
     throw new UsageError(
       `Please provide recovery details for Incident #${id} using:\n` +
       `  --cause "<suspected cause>"\n` +
-      `  --change "<change made>"\n` +
+      `  --change "<remediation change made>"\n` +
       `  --verify-cmd "<explicit verification command>"`
     );
   }
@@ -70,17 +75,23 @@ export async function recoverCommand({ context }) {
     return 0;
   }
 
-  const tag = styler.badge('rewind', styler.yellow);
-  const idText = styler.bold(`#${id}`);
-  const stateColor = targetState === RecoveryStates.FIXED ? styler.green : styler.yellow;
+  const s = styler;
+  const divider = s.dim('─'.repeat(60));
 
-  stdout.write(`${tag} Incident ${idText} transitioned to state: ${stateColor(targetState)}\n`);
-  if (cause) stdout.write(`  ${styler.dim('Suspected Cause:')} ${cause}\n`);
-  if (change) stdout.write(`  ${styler.dim('Change Made:')}     ${change}\n`);
-  if (verifyCmd) stdout.write(`  ${styler.dim('Verify Command:')}  ${styler.cyan(verifyCmd)}\n`);
+  stdout.write(`\n${s.bold('RECOVERY RECORDED')}  ${s.dim(`[Incident #${id}]`)}\n`);
+  stdout.write(`${divider}\n`);
+  stdout.write(`  ${s.dim('New State:'.padEnd(18))} ${formatStatusBadge(targetState, s)}\n`);
+  if (cause) stdout.write(`  ${s.dim('Suspected Cause:'.padEnd(18))} ${sanitizeForDisplay(cause)}\n`);
+  if (change) stdout.write(`  ${s.dim('Attempted Fix:'.padEnd(18))}   ${sanitizeForDisplay(change)}\n`);
+  if (verifyCmd) stdout.write(`  ${s.dim('Verify Command:'.padEnd(18))}  ${s.cyan(sanitizeForDisplay(verifyCmd))}\n`);
+  stdout.write(`${divider}\n`);
 
   if (targetState === RecoveryStates.FIXED && verifyCmd) {
-    stdout.write(`\nReady to verify! Run "${styler.cyan(`rewind verify ${id}`)}" to validate and seal this fix.\n`);
+    stdout.write(`\nNext Step:\n  Run "${s.cyan(`rewind verify ${id}`)}" to execute the verification command and seal this recovery.\n\n`);
+  } else if (targetState === RecoveryStates.SUSPECTED) {
+    stdout.write(`\nNext Step:\n  Record the change made and verification command with "${s.cyan(`rewind recover ${id} --change "..." --verify-cmd "..."`)}".\n\n`);
+  } else {
+    stdout.write('\n');
   }
 
   return 0;

@@ -2,6 +2,7 @@ import { MissingArgumentError } from '../errors.js';
 import { executeAndCapture } from '../capture.js';
 import { formatJson } from '../formatter.js';
 import { RecoveryStates } from '../storage/state.js';
+import { sanitizeForDisplay } from '../sanitizer.js';
 
 /**
  * Handler for `rewind run <command...>`.
@@ -40,22 +41,29 @@ export async function runCommand({ context }) {
     savedRecord = storage.saveRecord(result);
 
     if (!isJsonMode && stderr && typeof stderr.write === 'function') {
-      const tag = styler.badge('rewind', styler.yellow);
-      const idText = styler.bold(`#${savedRecord.id}`);
+      const s = styler;
+      const idText = s.bold(`#${savedRecord.id}`);
 
       if (savedRecord.status === RecoveryStates.REGRESSED && savedRecord.regressionOf) {
         const prior = storage.getRecord(savedRecord.regressionOf);
         const lastRecovery = prior?.recoveries?.[prior.recoveries.length - 1];
 
-        stderr.write(`\n${styler.red(styler.bold('[rewind:REGRESSION]'))} Failure matches previously ${styler.green('VERIFIED')} Incident #${savedRecord.regressionOf}!\n`);
+        const alertTitle = s.red(s.bold('[rewind:REGRESSION]'));
+        stderr.write(`\n${alertTitle} Failure matches previously ${s.green('VERIFIED')} Incident #${savedRecord.regressionOf}!\n\n`);
+
         if (lastRecovery) {
-          if (lastRecovery.cause) stderr.write(`  ${styler.dim('Suspected Cause:')} ${lastRecovery.cause}\n`);
-          if (lastRecovery.change) stderr.write(`  ${styler.dim('Verified Fix:')}    ${lastRecovery.change}\n`);
-          if (lastRecovery.verifyCmd) stderr.write(`  ${styler.dim('Verify Command:')}  ${styler.cyan(lastRecovery.verifyCmd)}\n`);
+          stderr.write(`${s.bold('Historical Recovery:')}\n`);
+          if (lastRecovery.cause) stderr.write(`  ${s.dim('Suspected Cause:'.padEnd(18))} ${sanitizeForDisplay(lastRecovery.cause)}\n`);
+          if (lastRecovery.change) stderr.write(`  ${s.dim('Verified Fix:'.padEnd(18))}    ${sanitizeForDisplay(lastRecovery.change)}\n`);
+          if (lastRecovery.verifyCmd) stderr.write(`  ${s.dim('Verify Command:'.padEnd(18))}  ${s.cyan(sanitizeForDisplay(lastRecovery.verifyCmd))}\n`);
+          stderr.write('\n');
         }
-        stderr.write(`Recorded new occurrence as Incident ${idText} (Status: ${styler.red('REGRESSED')}). Run "${styler.cyan(`rewind show ${savedRecord.id}`)}".\n\n`);
+
+        stderr.write(`Recorded new occurrence as Incident ${idText} (Status: ${s.red('REGRESSED')}). Run "${s.cyan(`rewind show ${savedRecord.id}`)}".\n`);
+        stderr.write(`${s.dim('Note: Historical recovery is evidence, not an automatic fix.')}\n\n`);
       } else {
-        stderr.write(`\n${tag} Recorded failure as incident ${idText}. Run "${styler.cyan(`rewind show ${savedRecord.id}`)}" to inspect.\n`);
+        const tag = s.badge('rewind', s.yellow);
+        stderr.write(`\n${tag} Recorded failure as incident ${idText}. Run "${s.cyan(`rewind show ${savedRecord.id}`)}" to inspect.\n\n`);
       }
     }
   }

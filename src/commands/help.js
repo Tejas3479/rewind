@@ -24,7 +24,7 @@ const COMMAND_DOCS = {
     description: 'List failure records and recovery timeline from the local ledger.',
     arguments: [],
     options: [
-      { flag: '--limit <N>', description: 'Limit number of entries displayed' },
+      { flag: '--limit <N>, -n <N>', description: 'Limit number of entries displayed' },
       { flag: '--json', description: 'Output history in JSON format' },
       { flag: '--no-color', description: 'Disable ANSI color formatting' },
       { flag: '--root <path>', description: 'Explicit project root / ledger directory' }
@@ -89,7 +89,7 @@ const COMMAND_DOCS = {
       { name: '<query...>', description: 'Search terms or error message snippet' }
     ],
     options: [
-      { flag: '--limit <N>', description: 'Limit number of candidate matches' },
+      { flag: '--limit <N>, -n <N>', description: 'Limit number of candidate matches' },
       { flag: '--json', description: 'Output search results as JSON' },
       { flag: '--no-color', description: 'Disable ANSI color formatting' },
       { flag: '--root <path>', description: 'Explicit project root / ledger directory' }
@@ -111,28 +111,34 @@ const COMMAND_DOCS = {
 export function formatTopLevelHelp(s) {
   const lines = [
     `${s.bold('REWIND')} — Remember what fixed it.`,
-    `${s.dim('A verified-recovery ledger for the terminal.')}`,
+    `${s.dim('A local verified-recovery ledger for the terminal.')}`,
     '',
     `${s.bold('USAGE:')}`,
     `  ${s.cyan('rewind')} ${s.yellow('<command>')} [options]`,
     '',
-    `${s.bold('COMMANDS:')}`,
-    `  ${s.green('run')} ${s.dim('<command...>')}   Execute command and record failure evidence`,
-    `  ${s.green('history')}              View failure and recovery ledger timeline`,
-    `  ${s.green('show')} ${s.dim('<id>')}           Inspect failure details, logs, and recovery state`,
-    `  ${s.green('recover')} ${s.dim('<id>')}        Attempt remediation and capture recovery action`,
-    `  ${s.green('verify')} ${s.dim('<id>')}         Run verification command and seal verified fix`,
-    `  ${s.green('search')} ${s.dim('<query...>')}   Search historical failures by error or fingerprint`,
+    `${s.bold('CORE WORKFLOW:')}`,
+    `  1. ${s.cyan('rewind run <command...>')}      Run command, stream output, and record failures on error`,
+    `  2. ${s.cyan('rewind history')}               Browse timeline of past failures and recovery states`,
+    `  3. ${s.cyan('rewind show <id>')}             Inspect full forensic logs, environment, and error fingerprint`,
+    `  4. ${s.cyan('rewind recover <id>')}          Record suspected cause, fix, and explicit verification command`,
+    `  5. ${s.cyan('rewind verify <id>')}           Run the user-approved verification command to validate and seal fix`,
+    `  6. ${s.cyan('rewind search <query...>')}     Search past failures by keyword, error text, or fingerprint`,
     '',
     `${s.bold('GLOBAL OPTIONS:')}`,
-    `  ${s.yellow('-h, --help')}          Show help information`,
-    `  ${s.yellow('-v, --version')}       Show version number`,
-    `  ${s.yellow('--json')}              Output results as JSON (read-only commands)`,
-    `  ${s.yellow('--no-color')}          Disable ANSI color formatting`,
-    `  ${s.yellow('--root <path>')}       Specify project root / ledger location`,
+    `  ${s.yellow('-h, --help')}                    Show help information`,
+    `  ${s.yellow('-v, --version')}                 Show version number`,
+    `  ${s.yellow('--json')}                        Output results as machine-readable JSON (read-only commands)`,
+    `  ${s.yellow('--no-color')}                    Disable ANSI color formatting (also respects NO_COLOR)`,
+    `  ${s.yellow('--root <path>')}                 Specify project root / ledger location`,
+    `  ${s.yellow('-n, --limit <N>')}               Limit number of results in history and search`,
+    '',
+    `${s.bold('SAFETY & TRUST INVARIANTS:')}`,
+    `  • ${s.dim('Zero Auto-Execution:')} Rewind NEVER automatically executes historical recovery fixes.`,
+    `  • ${s.dim('Explicit Verification:')} Verification runs ONLY the command explicitly approved by the user.`,
+    `  • ${s.dim('Local & Offline:')} 100% offline, zero network requests, zero telemetry, zero dependencies.`,
     '',
     `${s.bold('LEARN MORE:')}`,
-    `  Run ${s.cyan('rewind <command> --help')} or ${s.cyan('rewind help <command>')} for detailed command options.`
+    `  Run ${s.cyan('rewind <command> --help')} or ${s.cyan('rewind help <command>')} for command details.`
   ];
 
   return lines.join('\n');
@@ -162,7 +168,7 @@ export function formatCommandHelp(commandName, s) {
   if (doc.arguments.length > 0) {
     lines.push(`${s.bold('ARGUMENTS:')}`);
     for (const arg of doc.arguments) {
-      lines.push(`  ${s.yellow(arg.name.padEnd(16))} ${arg.description}`);
+      lines.push(`  ${s.yellow(arg.name.padEnd(20))} ${arg.description}`);
     }
     lines.push('');
   }
@@ -170,7 +176,7 @@ export function formatCommandHelp(commandName, s) {
   if (doc.options.length > 0) {
     lines.push(`${s.bold('OPTIONS:')}`);
     for (const opt of doc.options) {
-      lines.push(`  ${s.yellow(opt.flag.padEnd(16))} ${opt.description}`);
+      lines.push(`  ${s.yellow(opt.flag.padEnd(20))} ${opt.description}`);
     }
     lines.push('');
   }
