@@ -10,6 +10,7 @@ import { searchCommand } from './commands/search.js';
 import { verifyIntegrityCommand } from './commands/verify_integrity.js';
 import { rebuildCommand } from './commands/rebuild.js';
 import { patternsCommand } from './commands/patterns.js';
+import { contextCommand } from './commands/context.js';
 
 export const COMMANDS = Object.freeze({
   run: runCommand,
@@ -19,6 +20,7 @@ export const COMMANDS = Object.freeze({
   verify: verifyCommand,
   search: searchCommand,
   patterns: patternsCommand,
+  context: contextCommand,
   'verify-integrity': verifyIntegrityCommand,
   verify_integrity: verifyIntegrityCommand,
   rebuild: rebuildCommand,

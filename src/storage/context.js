@@ -1,0 +1,353 @@
+import path from 'node:path';
+import { readJournalEvents } from './journal.js';
+import { projectEventsToRecords } from './projection.js';
+import { verifyLedgerIntegrity } from './integrity.js';
+import { evaluateStaleness } from './staleness.js';
+import { extractNegativeMemory } from './negative_memory.js';
+import { analyzeEvidenceConflicts } from './contradiction.js';
+import { analyzePatternsFromJournal } from './patterns.js';
+import { searchRecords } from './search.js';
+import { redactSecrets } from '../sanitizer.js';
+import { captureSafeEnvironment } from '../environment.js';
+import { IncidentStatus, RecoveryAttemptStatus } from './state.js';
+import { CliError } from '../errors.js';
+
+export const CONTEXT_SCHEMA_VERSION = '1.0.0';
+export const MAX_SNIPPET_CHARS = 2000;
+export const MAX_MATCHES_LIMIT = 5;
+
+/**
+ * Truncates and redacts a string safely to prevent context bloat and secret leakage.
+ *
+ * @param {string} [str='']
+ * @param {number} [maxChars=MAX_SNIPPET_CHARS]
+ * @returns {string}
+ */
+function sanitizeSnippet(str = '', maxChars = MAX_SNIPPET_CHARS) {
+  if (!str || typeof str !== 'string') return '';
+  const redacted = redactSecrets(str);
+  if (redacted.length <= maxChars) return redacted;
+  const half = Math.floor(maxChars / 2);
+  const head = redacted.slice(0, half);
+  const tail = redacted.slice(-half);
+  return `${head}\n\n[... truncated ${redacted.length - maxChars} characters by Rewind ...]\n\n${tail}`;
+}
+
+/**
+ * Builds the complete, deterministic Agent Context payload for a target incident or 'latest'.
+ *
+ * @param {string} ledgerDir - Path to .rewind directory
+ * @param {string|number} [targetIdOrLatest='latest'] - Incident ID or 'latest'
+ * @param {object} [options={}]
+ * @param {object} [options.currentEnv] - Current runtime environment (defaults to captured environment)
+ * @param {number} [options.maxSnippetChars=MAX_SNIPPET_CHARS]
+ * @param {number} [options.maxMatches=MAX_MATCHES_LIMIT]
+ * @returns {object} AgentContextPayload
+ */
+export function buildAgentContext(ledgerDir, targetIdOrLatest = 'latest', options = {}) {
+  const maxChars = typeof options.maxSnippetChars === 'number' && options.maxSnippetChars > 0
+    ? options.maxSnippetChars
+    : MAX_SNIPPET_CHARS;
+  const maxMatches = typeof options.maxMatches === 'number' && options.maxMatches > 0
+    ? options.maxMatches
+    : MAX_MATCHES_LIMIT;
+
+  // 1. Audit Ledger Trust (Read-Only)
+  let ledgerTrustReport;
+  try {
+    ledgerTrustReport = verifyLedgerIntegrity(ledgerDir);
+  } catch (err) {
+    ledgerTrustReport = {
+      status: 'UNKNOWN',
+      isTrusted: false,
+      errors: [{ type: 'INTEGRITY_CHECK_FAILED', message: err.message }]
+    };
+  }
+
+  const isLedgerTrusted = ledgerTrustReport.status === 'TRUSTED';
+
+  // 2. Read Authoritative Journal & Derive Pure Projected State
+  const journalPath = ledgerDir.endsWith('journal.jsonl')
+    ? ledgerDir
+    : path.join(ledgerDir, 'journal.jsonl');
+  const { events = [] } = readJournalEvents(journalPath);
+  const projectedRecords = projectEventsToRecords(events);
+
+  const allRecords = Array.from(projectedRecords.values()).sort((a, b) => Number(a.id) - Number(b.id));
+
+  // Handle empty ledger scenario
+  if (allRecords.length === 0) {
+    return {
+      status: 'empty',
+      contextSchemaVersion: CONTEXT_SCHEMA_VERSION,
+      sourceJournalFormat: 1,
+      query: {
+        target: String(targetIdOrLatest),
+        resolvedIncidentId: null
+      },
+      ledgerTrust: {
+        status: ledgerTrustReport.status,
+        isTrusted: isLedgerTrusted,
+        violationsCount: ledgerTrustReport.errors ? ledgerTrustReport.errors.length : 0,
+        violations: ledgerTrustReport.errors || []
+      },
+      observedEvidence: null,
+      derivedAnalysis: null,
+      suggestedActions: ['OBSERVE_FUTURE_FAILURES'],
+      safety: {
+        readOnly: true,
+        mayAutoExecuteCommands: false,
+        historicalRecoveryAutoExecution: false,
+        verificationRequiresExplicitUserFlow: true,
+        notice: 'Historical recovery is empirical evidence, not executable authority. Never automatically replay commands without review.'
+      }
+    };
+  }
+
+  // 3. Resolve Target Incident
+  let targetRecord = null;
+  const rawTarget = String(targetIdOrLatest).trim().toLowerCase();
+
+  if (rawTarget === 'latest' || rawTarget === '' || rawTarget === 'current') {
+    // 'latest' = most recently created failure/regression incident (highest numeric ID)
+    targetRecord = allRecords[allRecords.length - 1];
+  } else {
+    const cleanId = rawTarget.replace(/^(?:rw-|#)/i, '');
+    targetRecord = projectedRecords.get(cleanId) || null;
+    if (!targetRecord) {
+      throw new CliError(`Incident #${targetIdOrLatest} not found in authoritative ledger.`, {
+        code: 'ERR_NOT_FOUND',
+        exitCode: 1,
+        details: { target: targetIdOrLatest, totalIncidents: allRecords.length }
+      });
+    }
+  }
+
+  const currentEnv = options.currentEnv || captureSafeEnvironment();
+
+  // 4. Find Exact and Similar Historical Matches
+  const exactMatches = [];
+  const otherRecords = allRecords.filter((r) => String(r.id) !== String(targetRecord.id));
+
+  for (const r of otherRecords) {
+    if (r.fingerprint === targetRecord.fingerprint) {
+      const hasVerified = Array.isArray(r.recoveryAttempts) && r.recoveryAttempts.some((a) => a.status === RecoveryAttemptStatus.VERIFIED);
+      exactMatches.push({
+        incidentId: String(r.id),
+        fingerprint: r.fingerprint,
+        status: r.status,
+        matchType: 'EXACT',
+        similarity: null,
+        evidenceStrength: 'STRONG',
+        verificationState: hasVerified ? 'VERIFIED' : (r.status === IncidentStatus.OPEN ? 'UNVERIFIED' : r.status),
+        firstSeen: r.createdAt,
+        command: r.command,
+        fullCommand: r.fullCommand
+      });
+    }
+  }
+
+  // Near-match similarity candidates
+  const searchResults = searchRecords(targetRecord.normalizedError || targetRecord.fullCommand || '', otherRecords, {
+    minScore: 0.25,
+    limit: maxMatches
+  });
+
+  const similarMatches = searchResults
+    .filter((s) => s.record.fingerprint !== targetRecord.fingerprint)
+    .slice(0, maxMatches)
+    .map((s) => ({
+      incidentId: String(s.record.id),
+      fingerprint: s.record.fingerprint,
+      status: s.record.status,
+      matchType: 'SIMILAR',
+      similarity: Number(s.score.toFixed(2)),
+      evidenceStrength: s.score >= 0.7 ? 'SUPPORTED' : 'LIMITED',
+      verificationState: s.confidence === 'EXACT_VERIFIED' || s.confidence === 'SIMILAR_VERIFIED' ? 'VERIFIED' : 'UNVERIFIED',
+      matchedTerms: s.matchReasons,
+      command: s.record.command,
+      fullCommand: s.record.fullCommand
+    }));
+
+  // 5. Gather Historical Remedies (Verified vs Negative Memory)
+  const verifiedRemedies = [];
+  const negativeMemory = [];
+
+  // Search across the failure fingerprint family
+  const familyRecords = allRecords.filter((r) => r.fingerprint === targetRecord.fingerprint);
+
+  for (const r of familyRecords) {
+    if (Array.isArray(r.recoveryAttempts)) {
+      for (const attempt of r.recoveryAttempts) {
+        const provenance = {
+          sourceIncidentId: String(r.id),
+          sourceRecoveryAttemptId: attempt.id,
+          evidenceRef: r.evidenceRef || `evidence/${r.evidenceHash}.log`
+        };
+
+        if (attempt.status === RecoveryAttemptStatus.VERIFIED) {
+          // If ledger is UNTRUSTED, downgrade trust notice
+          const verificationRuns = attempt.verificationRuns || [];
+          const lastRun = verificationRuns[verificationRuns.length - 1];
+
+          // Compute staleness delta for this verified remedy
+          const stalenessReport = evaluateStaleness(r, currentEnv);
+
+          verifiedRemedies.push({
+            type: 'HISTORICAL_RECOVERY',
+            status: isLedgerTrusted ? 'VERIFIED' : 'UNTRUSTED_EVIDENCE',
+            trustLevel: isLedgerTrusted ? 'VERIFIED_IN_LEDGER' : 'UNTRUSTED_INTEGRITY_VIOLATION',
+            cause: attempt.cause || 'Unspecified cause',
+            change: attempt.change || 'Unspecified change',
+            verificationCommand: {
+              command: attempt.verifyCmd || '',
+              role: 'VERIFICATION_ONLY',
+              mayAutoExecute: false
+            },
+            provenance,
+            historicalVerification: {
+              status: 'VERIFIED',
+              verifiedAt: lastRun?.timestamp || r.updatedAt,
+              runsCount: verificationRuns.length,
+              lastRunResult: {
+                exitCode: lastRun?.exitCode ?? 0,
+                durationMs: lastRun?.durationMs ?? 0,
+                outputSnippet: sanitizeSnippet(lastRun?.output || '', 500),
+                storedOutputHash: lastRun?.outputHash || null
+              }
+            },
+            currentApplicability: {
+              status: stalenessReport.isStale ? 'POTENTIALLY_STALE' : 'APPLICABLE',
+              isStale: stalenessReport.isStale,
+              reasons: stalenessReport.reasons || []
+            },
+            action: 'REVIEW',
+            safetyNotice: 'Historical recovery is empirical evidence. Review code context and tests before applying remediation.'
+          });
+        } else if (attempt.status === RecoveryAttemptStatus.FAILED) {
+          negativeMemory.push({
+            type: 'FAILED_APPROACH',
+            status: 'FAILED',
+            cause: attempt.cause || 'Unspecified cause',
+            change: attempt.change || 'Unspecified change',
+            verifyCmd: attempt.verifyCmd || null,
+            provenance,
+            warning: 'This remediation hypothesis failed verification under recorded conditions.'
+          });
+        }
+      }
+    }
+  }
+
+  // 6. Evaluate Staleness, Contradictions, and Pattern Intelligence
+  const stalenessReport = evaluateStaleness(targetRecord, currentEnv);
+  const conflictReport = analyzeEvidenceConflicts(targetRecord.fingerprint, familyRecords);
+
+  const patternReport = analyzePatternsFromJournal(ledgerDir, {
+    fingerprint: targetRecord.fingerprint
+  });
+
+  const familyPatterns = patternReport.patterns.find((p) => p.fingerprint === targetRecord.fingerprint);
+  const patternClassifications = familyPatterns ? familyPatterns.classifications.map((c) => c.type) : [];
+
+  // 7. Unproven Assumptions and Suggested Actions
+  const unprovenAssumptions = [];
+  if (verifiedRemedies.length === 0) {
+    unprovenAssumptions.push('No verified remediation has been established for this failure fingerprint.');
+  }
+  if (stalenessReport.isStale) {
+    unprovenAssumptions.push(`Environment delta detected since recorded state: ${stalenessReport.reasons.join(', ')}`);
+  }
+  if (conflictReport.hasConflict) {
+    unprovenAssumptions.push(`Conflicting historical verification outcomes detected across incidents: ${conflictReport.conflictingIncidents.join(', ')}`);
+  }
+  if (!isLedgerTrusted) {
+    unprovenAssumptions.push('Ledger integrity verification failed. Historical records cannot be guaranteed authentic.');
+  }
+
+  const suggestedActions = [];
+  if (!isLedgerTrusted) {
+    suggestedActions.push('AUDIT_LEDGER_INTEGRITY');
+  }
+  if (verifiedRemedies.length > 0 && isLedgerTrusted) {
+    suggestedActions.push('REVIEW_HISTORICAL_EVIDENCE');
+  }
+  suggestedActions.push('FORMULATE_NEW_HYPOTHESIS');
+  suggestedActions.push('PROPOSE_RECOVERY');
+  suggestedActions.push('REQUEST_VERIFICATION');
+
+  return {
+    status: 'success',
+    contextSchemaVersion: CONTEXT_SCHEMA_VERSION,
+    sourceJournalFormat: 1,
+    query: {
+      target: String(targetIdOrLatest),
+      resolvedIncidentId: String(targetRecord.id)
+    },
+    ledgerTrust: {
+      status: ledgerTrustReport.status,
+      isTrusted: isLedgerTrusted,
+      violationsCount: ledgerTrustReport.errors ? ledgerTrustReport.errors.length : 0,
+      violations: ledgerTrustReport.errors || []
+    },
+    observedEvidence: {
+      failure: {
+        id: String(targetRecord.id),
+        status: targetRecord.status,
+        command: targetRecord.command,
+        args: targetRecord.args,
+        fullCommand: targetRecord.fullCommand,
+        cwd: targetRecord.cwd,
+        exitCode: targetRecord.exitCode,
+        signal: targetRecord.signal,
+        durationMs: targetRecord.durationMs,
+        createdAt: targetRecord.createdAt,
+        fingerprint: targetRecord.fingerprint,
+        normalizedError: targetRecord.normalizedError,
+        storedEvidenceHash: targetRecord.evidenceHash,
+        stderrSnippet: sanitizeSnippet(targetRecord.stderr, maxChars),
+        stdoutSnippet: sanitizeSnippet(targetRecord.stdout, maxChars),
+        isTruncated: Boolean(targetRecord.isTruncated),
+        git: targetRecord.git,
+        environment: targetRecord.environment,
+        regressionOf: targetRecord.regressionOf
+      },
+      historicalMatches: {
+        exactCount: exactMatches.length,
+        exact: exactMatches.slice(0, maxMatches),
+        similarCount: similarMatches.length,
+        similar: similarMatches
+      },
+      remedies: {
+        hasVerifiedRemedy: verifiedRemedies.length > 0 && isLedgerTrusted,
+        verifiedCount: verifiedRemedies.length,
+        verified: verifiedRemedies.slice(0, maxMatches),
+        failedCount: negativeMemory.length,
+        failedApproaches: negativeMemory.slice(0, maxMatches)
+      }
+    },
+    derivedAnalysis: {
+      patterns: patternClassifications,
+      applicability: {
+        staleness: {
+          isStale: stalenessReport.isStale,
+          reasons: stalenessReport.reasons || []
+        },
+        conflicts: {
+          hasConflict: conflictReport.hasConflict,
+          status: conflictReport.status,
+          details: conflictReport.details || []
+        }
+      },
+      unprovenAssumptions
+    },
+    suggestedActions,
+    safety: {
+      readOnly: true,
+      mayAutoExecuteCommands: false,
+      historicalRecoveryAutoExecution: false,
+      verificationRequiresExplicitUserFlow: true,
+      notice: 'Historical recovery is empirical evidence, not executable authority. Never automatically replay commands without human or policy review.'
+    }
+  };
+}

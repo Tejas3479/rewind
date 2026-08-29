@@ -1,0 +1,257 @@
+# REWIND Agent-Consumption Interface Specification
+
+> **Version:** `1.0.0`  
+> **Status:** Standard Machine Interface  
+> **Runtime Dependencies:** `0` (Zero external packages, zero AI APIs, zero remote services)
+
+---
+
+## 1. Overview & Core Purpose
+
+REWIND is an offline, zero-dependency command intelligence tool that records execution failures, forensic evidence, multi-attempt remediation hypotheses, and user-approved verification runs.
+
+The **Agent-Consumption Interface** allows autonomous and interactive coding agents (e.g. Claude Code, Gemini CLI, Cursor, Codex, and custom terminal automation agents) to query historical failure context **without turning Rewind into an AI product** and **without treating historical remedies as executable authority**.
+
+### Core Guarantees for Consuming Agents:
+1. **Deterministic JSON Contract**: Stable field names, predictable array structures, and typed schemas.
+2. **Pure Output Hygiene**: When invoked with `--json`, Rewind writes **100% parseable JSON** to `stdout` with zero banner text, zero interactive prompts, and zero ANSI escape sequences.
+3. **Strict Non-Auto-Execution Policy**: Historical verification commands and past fixes are explicitly labeled as **`HISTORICAL_RECOVERY`** with `action: "REVIEW"`. Consuming agents are forbidden from automatically executing historical commands.
+4. **Authoritative Ledger Trust Verification**: Context includes a cryptographic audit report of the local event journal (`.rewind/journal.jsonl`). If tampering or corruption is detected, historical claims are downgraded to `UNTRUSTED_EVIDENCE`.
+5. **Secret Redaction**: API keys (OpenAI, AWS, GitHub PATs, Slack, private keys, bearer tokens) are scrubbed before payload assembly.
+
+---
+
+## 2. Command Reference
+
+| Command | Output Target | Purpose |
+| :--- | :--- | :--- |
+| `rewind context latest --json` | `stdout` | Resolve the most recent failure incident and return complete forensic evidence and remedies |
+| `rewind context <id> --json` | `stdout` | Resolve a specific historical incident (e.g. `rewind context 4 --json`) |
+| `rewind history --json` | `stdout` | Full timeline of recorded incidents and their current verification states |
+| `rewind show <id> --json` | `stdout` | Complete uncurated forensic snapshot of a single incident |
+| `rewind search <query> --json` | `stdout` | Deterministic keyword and near-match similarity search across historical incidents |
+| `rewind patterns --json` | `stdout` | Empirical failure family patterns (flakiness, regressions, environment skews) |
+| `rewind verify-integrity --json` | `stdout` | Read-only 4-layer cryptographic ledger integrity audit |
+
+---
+
+## 3. Agent Context Schema (`rewind context latest --json`)
+
+### Complete JSON Structure Example
+
+```json
+{
+  "status": "success",
+  "contextSchemaVersion": "1.0.0",
+  "sourceJournalFormat": 1,
+  "query": {
+    "target": "latest",
+    "resolvedIncidentId": "14"
+  },
+  "ledgerTrust": {
+    "status": "TRUSTED",
+    "isTrusted": true,
+    "violationsCount": 0,
+    "violations": []
+  },
+  "observedEvidence": {
+    "failure": {
+      "id": "14",
+      "status": "OPEN",
+      "command": "npm",
+      "args": ["test"],
+      "fullCommand": "npm test",
+      "cwd": "/workspace/project",
+      "exitCode": 1,
+      "signal": null,
+      "durationMs": 45,
+      "createdAt": "2026-08-29T15:30:00.000Z",
+      "fingerprint": "a1b2c3d4e5f6",
+      "normalizedError": "ECONNREFUSED 127.0.0.1:5432",
+      "storedEvidenceHash": "7f8a9b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a",
+      "stderrSnippet": "Error: connect ECONNREFUSED 127.0.0.1:5432\n    at TCPConnectWrap.afterConnect",
+      "stdoutSnippet": "",
+      "isTruncated": false,
+      "git": {
+        "isGit": true,
+        "headCommit": "4a8b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b",
+        "branch": "main"
+      },
+      "environment": {
+        "platform": "linux",
+        "nodeMajor": 22
+      },
+      "regressionOf": null
+    },
+    "historicalMatches": {
+      "exactCount": 1,
+      "exact": [
+        {
+          "incidentId": "1",
+          "fingerprint": "a1b2c3d4e5f6",
+          "status": "RECOVERED",
+          "matchType": "EXACT",
+          "similarity": null,
+          "evidenceStrength": "STRONG",
+          "verificationState": "VERIFIED",
+          "firstSeen": "2026-08-28T10:00:00.000Z",
+          "command": "npm",
+          "fullCommand": "npm test"
+        }
+      ],
+      "similarCount": 1,
+      "similar": [
+        {
+          "incidentId": "5",
+          "fingerprint": "b2c3d4e5f6a1",
+          "status": "OPEN",
+          "matchType": "SIMILAR",
+          "similarity": 0.82,
+          "evidenceStrength": "SUPPORTED",
+          "verificationState": "UNVERIFIED",
+          "matchedTerms": ["econnrefused", "5432"],
+          "command": "npm",
+          "fullCommand": "npm run test:e2e"
+        }
+      ]
+    },
+    "remedies": {
+      "hasVerifiedRemedy": true,
+      "verifiedCount": 1,
+      "verified": [
+        {
+          "type": "HISTORICAL_RECOVERY",
+          "status": "VERIFIED",
+          "trustLevel": "VERIFIED_IN_LEDGER",
+          "cause": "PostgreSQL container was not running",
+          "change": "Started local container via docker compose up -d postgres",
+          "verificationCommand": {
+            "command": "npm test",
+            "role": "VERIFICATION_ONLY",
+            "mayAutoExecute": false
+          },
+          "provenance": {
+            "sourceIncidentId": "1",
+            "sourceRecoveryAttemptId": 2,
+            "evidenceRef": "evidence/7f8a9b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a.log"
+          },
+          "historicalVerification": {
+            "status": "VERIFIED",
+            "verifiedAt": "2026-08-28T10:05:00.000Z",
+            "runsCount": 1,
+            "lastRunResult": {
+              "exitCode": 0,
+              "durationMs": 120,
+              "outputSnippet": "PASS: 12 test suites passed",
+              "storedOutputHash": "3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f"
+            }
+          },
+          "currentApplicability": {
+            "status": "APPLICABLE",
+            "isStale": false,
+            "reasons": []
+          },
+          "action": "REVIEW",
+          "safetyNotice": "Historical recovery is empirical evidence. Review code context and tests before applying remediation."
+        }
+      ],
+      "failedCount": 1,
+      "failedApproaches": [
+        {
+          "type": "FAILED_APPROACH",
+          "status": "FAILED",
+          "cause": "Assumed wrong port configuration",
+          "change": "Modified DB_PORT to 5433",
+          "verifyCmd": "npm test",
+          "provenance": {
+            "sourceIncidentId": "1",
+            "sourceRecoveryAttemptId": 1,
+            "evidenceRef": "evidence/7f8a9b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a.log"
+          },
+          "warning": "This remediation hypothesis failed verification under recorded conditions."
+        }
+      ]
+    }
+  },
+  "derivedAnalysis": {
+    "patterns": [
+      "RECURRING_FAILURE",
+      "FREQUENTLY_VERIFIED_RECOVERY"
+    ],
+    "applicability": {
+      "staleness": {
+        "isStale": false,
+        "reasons": []
+      },
+      "conflicts": {
+        "hasConflict": false,
+        "status": "NONE",
+        "details": []
+      }
+    },
+    "unprovenAssumptions": [
+      "No environment delta detected between recorded verification and current runtime."
+    ]
+  },
+  "suggestedActions": [
+    "REVIEW_HISTORICAL_EVIDENCE",
+    "FORMULATE_NEW_HYPOTHESIS",
+    "PROPOSE_RECOVERY",
+    "REQUEST_VERIFICATION"
+  ],
+  "safety": {
+    "readOnly": true,
+    "mayAutoExecuteCommands": false,
+    "historicalRecoveryAutoExecution": false,
+    "verificationRequiresExplicitUserFlow": true,
+    "notice": "Historical recovery is empirical evidence, not executable authority. Never automatically replay commands without human or policy review."
+  }
+}
+```
+
+---
+
+## 4. Key Agent Consumption Rules
+
+### Rule 1: Always Check `ledgerTrust`
+Before relying on historical claims:
+- If `ledgerTrust.isTrusted === true`: The cryptographic SHA-256 hash chain matches the immutable journal. Verified recoveries reflect authentic prior executions.
+- If `ledgerTrust.isTrusted === false`: The ledger has been tampered with or corrupted. All remedies are downgraded to `UNTRUSTED_EVIDENCE`.
+
+### Rule 2: Distinguish Exact vs. Similar Matches
+- `historicalMatches.exact`: Incidents sharing the exact same conservative SHA-256 error fingerprint.
+- `historicalMatches.similar`: Incidents retrieved by TF-IDF / keyword similarity. **Similarity does not equal causality or verified identity.**
+
+### Rule 3: Inspect `failedApproaches` (Negative Memory)
+Before proposing a fix, inspect `observedEvidence.remedies.failedApproaches`. If an approach failed in the past, avoid proposing the exact same flawed change.
+
+### Rule 4: Check `currentApplicability`
+If `currentApplicability.isStale === true`, the current environment differs from the recorded verification run (e.g. different major Node.js runtime or different OS).
+
+---
+
+## 5. Generic Integration Patterns for Coding Agents
+
+Any AI tool or automation agent with terminal execution capabilities can integrate with Rewind.
+
+### Generic Workflow Recipe
+
+```bash
+# Step 1: Execute test/build command wrapped by Rewind
+rewind run npm test
+
+# Step 2: If the command fails (non-zero exit), fetch agent context in JSON
+rewind context latest --json
+
+# Step 3: Parse JSON in your agent loop
+# - Inspect observedEvidence.failure.stderrSnippet
+# - Check observedEvidence.remedies.verified
+# - Avoid observedEvidence.remedies.failedApproaches
+# - Propose code changes to user
+
+# Step 4: Record newly proposed recovery
+rewind recover 14 --cause "..." --change "..." --verify-cmd "npm test"
+
+# Step 5: Ask human to run verification
+rewind verify 14
+```

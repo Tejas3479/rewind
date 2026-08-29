@@ -119,6 +119,23 @@ const COMMAND_DOCS = {
       'rewind patterns --json'
     ]
   },
+  context: {
+    usage: 'rewind context [latest|<id>] [options]',
+    description: 'Output structured diagnostic failure context, verified remedies, negative memory, and non-causal deltas for coding agents.',
+    arguments: [
+      { name: '[latest|<id>]', description: 'Target incident ID or "latest" (defaults to latest failure)' }
+    ],
+    options: [
+      { flag: '--json', description: 'Output pure structured JSON for machine/agent consumption' },
+      { flag: '--no-color', description: 'Disable ANSI color formatting' },
+      { flag: '--root <path>', description: 'Explicit project root / ledger directory' }
+    ],
+    examples: [
+      'rewind context latest --json',
+      'rewind context 1 --json',
+      'rewind context'
+    ]
+  },
   'verify-integrity': {
     usage: 'rewind verify-integrity [options]',
     description: 'Perform a strictly read-only 4-layer cryptographic audit across the journal, hash chain, checkpoint, and derived views.',
@@ -171,8 +188,9 @@ export function formatTopLevelHelp(s) {
     `  5. ${s.cyan('rewind verify <id>')}               Run user-approved verification command to validate and seal fix`,
     `  6. ${s.cyan('rewind search <query...>')}         Search past failures by keyword, error text, or fingerprint`,
     `  7. ${s.cyan('rewind patterns')}                  Analyze failure/recovery patterns and flakiness diagnostics`,
-    `  8. ${s.cyan('rewind verify-integrity')}          Audit cryptographic hash chain and checkpoint integrity`,
-    `  9. ${s.cyan('rewind rebuild')}                   Reconstruct derived incident views from immutable journal`,
+    `  8. ${s.cyan('rewind context [latest|<id>]')}     Output structured diagnostic context for coding agents`,
+    `  9. ${s.cyan('rewind verify-integrity')}          Audit cryptographic hash chain and checkpoint integrity`,
+    `  10. ${s.cyan('rewind rebuild')}                  Reconstruct derived incident views from immutable journal`,
     '',
     `${s.bold('GLOBAL OPTIONS:')}`,
     `  ${s.yellow('-h, --help')}                        Show help information`,

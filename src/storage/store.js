@@ -18,6 +18,7 @@ import {
 import { projectEventsToRecords, writeProjectedRecords } from './projection.js';
 import { verifyLedgerIntegrity } from './integrity.js';
 import { analyzePatternsFromJournal } from './patterns.js';
+import { buildAgentContext } from './context.js';
 import { CliError } from '../errors.js';
 
 /**
@@ -683,6 +684,20 @@ export class StorageEngine {
       this.init();
     }
     return analyzePatternsFromJournal(this.ledgerDir, options);
+  }
+
+  /**
+   * Generates an Agent Context payload from the authoritative journal.
+   *
+   * @param {string|number} [targetIdOrLatest='latest']
+   * @param {object} [options={}]
+   * @returns {object}
+   */
+  getAgentContext(targetIdOrLatest = 'latest', options = {}) {
+    if (!this.initialized) {
+      this.init();
+    }
+    return buildAgentContext(this.ledgerDir, targetIdOrLatest, options);
   }
 
   /**

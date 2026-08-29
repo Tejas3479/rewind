@@ -35,13 +35,16 @@ node bin/rewind.js run node -e "console.error('FATAL: Database connection pool e
 # 8. Analyze failure & recovery patterns across the repository
 node bin/rewind.js patterns --explain
 
-# 9. Run the complete automated test suite (175 tests, 0 dependencies)
+# 9. Query structured forensic context for coding agents
+node bin/rewind.js context latest --json
+
+# 10. Run the complete automated test suite (187 tests, 0 dependencies)
 npm test
 
-# 10. Audit cryptographic integrity of the local ledger
+# 11. Audit cryptographic integrity of the local ledger
 node bin/rewind.js verify-integrity
 
-# 11. Rebuild derived incident projections from immutable journal
+# 12. Rebuild derived incident projections from immutable journal
 node bin/rewind.js rebuild
 ```
 
@@ -152,6 +155,7 @@ To guarantee byte-level reproducibility:
 | `rewind verify <id>` | Execute the user-approved verification command to validate and seal the fix |
 | `rewind search <query...> [options]` | Deterministically search historical failures by error message, keywords, or fingerprint |
 | `rewind patterns [options]` | Analyze historical failures into deterministic, evidence-backed pattern diagnostics |
+| `rewind context [latest|<id>] [options]` | Query structured forensic diagnostic context and remedies for coding agents |
 | `rewind verify-integrity [options]` | Perform read-only 4-layer cryptographic audit across hash chain and checkpoints |
 | `rewind rebuild [options]` | Reconstruct derived incident projection records from the authoritative journal |
 
@@ -227,7 +231,20 @@ Rewind transforms raw failure logs and verified recoveries into **deterministic,
 
 ---
 
-## 5. Installation & Execution
+## 6. Agent-Consumption Interface (`rewind context`)
+
+Rewind provides a structured, safe, machine-readable JSON interface for autonomous and interactive coding agents (e.g. Claude Code, Gemini CLI, Cursor, Codex, and terminal automation tools):
+
+```bash
+# Fetch structured forensic failure context, verified remedies, and negative memory
+rewind context latest --json
+```
+
+See [`AGENT_INTERFACE.md`](./AGENT_INTERFACE.md) for the complete JSON Schema specification, ledger trust boundaries, anti-auto-execution policies, and generic integration patterns.
+
+---
+
+## 7. Installation & Execution
 
 ### Prerequisites
 * Node.js **>= 20.0.0** (tested and verified on Node.js v20.x, v22.x, v24.x LTS).
@@ -371,7 +388,7 @@ See [`SECURITY.md`](./SECURITY.md) for full threat model and mitigations.
 ## 9. Tested Platforms & Limitations
 
 ### Platform Testing Matrix
-- **Windows 11 (x64):** **VERIFIED** (Full test suite of 175 tests across 44 suites passing; live CLI execution verified).
+- **Windows 11 (x64):** **VERIFIED** (Full test suite of 187 tests across 50 suites passing; live CLI execution verified).
 - **Linux / POSIX:** **VERIFIED** (Standard Node.js built-ins and POSIX path semantics).
 - **macOS (Darwin):** **VERIFIED** (Standard Darwin pathing and file permission models).
 
@@ -395,7 +412,8 @@ The entire Rewind CLI was designed, architected, implemented, hardened, and veri
 - History timeline, detailed show inspector, and near-match search engine.
 - Immutable event journal, 4-layer cryptographic integrity layer, and projection rebuild engine.
 - Deterministic pattern intelligence engine with `--explain` evidentiary reasoning.
-- 44 test suites covering 175 automated test cases.
+- Safe, deterministic agent-consumption interface (`rewind context latest --json`).
+- 50 test suites covering 187 automated test cases.
 
 ### AI Tools Usage Disclosure
 Antigravity (Google DeepMind) was used as an AI pair programmer for code generation, test authoring, architectural review, and documentation drafting under developer direction. All generated code and tests were audited and verified against the event's zero-dependency rules.
