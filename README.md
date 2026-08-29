@@ -35,7 +35,7 @@ node bin/rewind.js run node -e "console.error('FATAL: Database connection pool e
 # 7. Search past remedies by keyword query
 node bin/rewind.js search "connection pool exhausted"
 
-# 8. Run the complete automated test suite (130 tests, 0 dependencies)
+# 8. Run the complete automated test suite (143 tests, 0 dependencies)
 npm test
 ```
 
@@ -45,15 +45,17 @@ npm test
 
 Terminal errors happen constantly during development, testing, and CI/CD. Developers frequently lose hours rediscovering fixes for obscure errors (e.g. database connection pool exhaustion, missing native bindings, configuration syntax errors) that they or their team already solved in the past.
 
-Command history logs *what* was typed, but not *why* it failed, *what* was changed to fix it, or *whether* the fix was verified.
+Command history logs *what* was typed, but not *why* it failed, *what* was changed to fix it, *which approaches failed*, or *whether* the fix was verified.
 
 **Rewind** bridges this gap:
-1. **Captures Failures:** Wraps command execution, streaming live stdout/stderr while recording exit codes, timing, environment metadata, and git HEAD status upon failure.
+1. **Captures Failures:** Wraps command execution, streaming live stdout/stderr while recording exit codes, timing, environment metadata, bounded logs with SHA-256 evidence hashing, and git HEAD status upon failure.
 2. **Preserves Evidence:** Stores crash-safe, immutable JSON records in a local `.rewind/` ledger.
 3. **Fingerprints Error Memory:** Conservatively normalizes transient noise (timestamps, PIDs, temporary paths, memory pointers) and computes reproducible 16-character SHA-256 fingerprints.
-4. **Enforces the Trust Loop:** Tracks remediation across a strict state machine (`OBSERVED` $\rightarrow$ `SUSPECTED` $\rightarrow$ `FIXED` $\rightarrow$ `VERIFIED` and `VERIFIED` $\rightarrow$ `REGRESSED`).
-5. **Detects Regressions:** Instantly recognizes recurring failures, flags them as `REGRESSED`, and surfaces the previous verified fix and verification command.
-6. **Near-Match Search:** Deterministically searches historical failures using keyword recall, Jaccard overlap, and clear evidence confidence labels (`VERIFIED`, `LIKELY`, `NOT PROVEN`).
+4. **Enforces the Trust Loop & 3-Tier State Model:** Strictly separates Incident Status (`OBSERVED`, `OPEN`, `RECOVERED`, `REGRESSED`, `RESOLVED`), Recovery Attempt Status (`PROPOSED`, `ATTEMPTED`, `FAILED`, `VERIFIED`), and Derived Evidence Flags (`STALE`, `CONTRADICTED`, `DIVERGENT_EVIDENCE`).
+5. **Multi-Attempt History & Negative Memory:** Preserves every remediation attempt chronologically. When an attempt fails verification, it is permanently sealed into *Negative Memory* (`KNOWN FAILED APPROACHES`), warning developers away from repeating dead ends.
+6. **Relevance-Aware Staleness Evaluation:** Detects when a verified fix may no longer apply due to major runtime changes (e.g. Node 20 to Node 22), OS platform changes, or missing environment keys—without falsely invalidating on harmless git commits or patch bumps.
+7. **Contradiction vs. Divergence Analysis:** Detects when two historical verification runs under equivalent conditions produced conflicting outcomes (`CONTRADICTED`) vs cross-platform differences (`DIVERGENT_EVIDENCE`).
+8. **Near-Match & Exact-Match Search:** Deterministically searches historical failures using keyword recall, Jaccard overlap, exact fingerprint matching, and strict evidence confidence labels (`EXACT MATCH: VERIFIED`, `SIMILAR: VERIFIED RECOVERY`, `LIKELY PATTERN`, `NOT PROVEN`).
 
 ---
 
@@ -64,23 +66,23 @@ Rewind operates on strict safety and evidentiary principles:
 ```text
 [Command Fails]
        ↓
-   OBSERVED
-       ↓ (record suspected cause)
-   SUSPECTED
-       ↓ (record change made & verification command)
-     FIXED
-       ↓ (rewind verify <id> passes with exit code 0)
-   VERIFIED
-       ↓ (identical failure fingerprint recurs in the future)
-   REGRESSED
-       ↓ (new recovery loop initiated)
-   SUSPECTED → FIXED → VERIFIED
+ Incident: OBSERVED
+       ↓ (rewind recover <id> --cause "..." --change "..." --verify-cmd "...")
+ Incident: OPEN  |  Attempt #1: PROPOSED
+       ↓ (rewind verify <id> executes explicit verification command)
+       ├─ [Exit != 0] → Attempt #1: FAILED (Sealed in Negative Memory)
+       │                 Incident remains OPEN for Attempt #2
+       └─ [Exit == 0] → Attempt #1: VERIFIED
+                         Incident: RECOVERED
+                               ↓ (identical failure recurs in future)
+                         New Incident: REGRESSED (links to Incident #1)
 ```
 
 ### Critical Safety Invariants
 * **Zero Automatic Execution of Historical Fixes:** Historical remediation is *evidence*, not authority. Rewind never executes past fixes automatically.
 * **Explicit User Verification:** `rewind verify <id>` executes **only** the verification command explicitly recorded by the user for that specific incident.
-* **Verified vs. Likely:** A fix is only labeled `VERIFIED` after its explicit verification command exits with code `0`. Search results and unverified records (`OBSERVED`, `SUSPECTED`, `FIXED`) are never presented with `VERIFIED` confidence.
+* **Negative Memory is Preserved:** Failed attempts are never deleted or overwritten; they become durable warnings against repeating flawed approaches.
+* **Verified vs. Likely:** A fix is only labeled `VERIFIED` after its explicit verification command exits with code `0`. Similarity search results never claim `VERIFIED` certainty for unverified records.
 
 ---
 

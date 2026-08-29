@@ -176,7 +176,7 @@ describe('Conservative Near-Match Search (src/storage/search.js)', () => {
       assert.equal(codeText, 0);
       const textOut = mockSearchText.getStdout();
       assert.ok(textOut.includes('SEARCH RESULTS for "Redis cluster socket timeout"'));
-      assert.ok(textOut.includes('[VERIFIED RECOVERY]'));
+      assert.ok(textOut.includes('VERIFIED RECOVERY'));
       assert.ok(textOut.includes('Redis endpoint was unreachable'));
       assert.ok(textOut.includes('Updated host to redis.internal'));
 

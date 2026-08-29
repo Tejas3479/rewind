@@ -5,21 +5,25 @@ import { sanitizeForDisplay } from '../sanitizer.js';
 /**
  * Derives a concise result summary for an incident row.
  *
- * @param {import('../storage/record.js').FailureRecord} rec
+ * @param {import('../storage/record.js').IncidentRecord} rec
  * @param {import('../formatter.js').createStyler} s
  * @returns {string}
  */
 function getResultSummary(rec, s) {
-  if (rec.status === RecoveryStates.VERIFIED) {
+  if (rec.status === 'RECOVERED' || rec.status === 'VERIFIED') {
     return s.green('verified fix');
   }
-  if (rec.status === RecoveryStates.REGRESSED) {
+  if (rec.status === 'REGRESSED') {
     return rec.regressionOf ? s.red(`matches #${rec.regressionOf}`) : s.red('regressed');
   }
-  if (rec.status === RecoveryStates.FIXED) {
-    return s.cyan('fix recorded');
+  if (rec.status === 'OPEN' || rec.status === 'FIXED') {
+    const attempts = Array.isArray(rec.recoveryAttempts) ? rec.recoveryAttempts.length : 0;
+    return s.cyan(attempts > 0 ? `${attempts} attempt(s)` : 'open');
   }
-  if (rec.status === RecoveryStates.SUSPECTED) {
+  if (rec.status === 'RESOLVED') {
+    return s.blue('resolved');
+  }
+  if (rec.status === 'SUSPECTED') {
     return s.yellow('suspected');
   }
   if (rec.exitCode !== null && rec.exitCode !== undefined) {

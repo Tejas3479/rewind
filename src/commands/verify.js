@@ -1,15 +1,17 @@
 import { MissingArgumentError, CliError, UsageError } from '../errors.js';
-import { RecoveryStates, assertValidTransition } from '../storage/state.js';
+import { IncidentStatus, RecoveryAttemptStatus } from '../storage/state.js';
 import { executeAndCapture } from '../capture.js';
 import { tokenizeCommandLine } from '../parser.js';
 import { formatJson, formatBox } from '../formatter.js';
 import { sanitizeForDisplay } from '../sanitizer.js';
 import { normalizeId } from '../storage/store.js';
+import { formatContradictionSection } from '../storage/contradiction.js';
 
 /**
  * Handler for `rewind verify <id>`.
  * Loads the selected recovery record, displays and executes ONLY the explicitly stored
- * verification command, and updates the trust loop state to VERIFIED upon success.
+ * verification command, appends an immutable VerificationRun, updates trust loop state,
+ * and runs contradiction analysis.
  *
  * @param {object} params
  * @param {import('../cli.js').CliContext} params.context
@@ -33,20 +35,23 @@ export async function verifyCommand({ context }) {
     });
   }
 
-  if (record.status === RecoveryStates.VERIFIED) {
-    throw new UsageError(`Incident #${id} is already in state VERIFIED.`);
+  const isRecovered = record.status === IncidentStatus.RECOVERED || record.status === 'VERIFIED';
+  if (isRecovered) {
+    throw new UsageError(`Incident #${id} is already in state RECOVERED / VERIFIED.`);
   }
 
-  // Find the latest recorded verification command
-  let verifyCmd = null;
-  if (Array.isArray(record.recoveries)) {
-    for (let i = record.recoveries.length - 1; i >= 0; i--) {
-      if (record.recoveries[i].verifyCmd) {
-        verifyCmd = record.recoveries[i].verifyCmd;
+  // Find the latest recovery attempt with a verifyCmd
+  let targetAttempt = null;
+  if (Array.isArray(record.recoveryAttempts)) {
+    for (let i = record.recoveryAttempts.length - 1; i >= 0; i--) {
+      if (record.recoveryAttempts[i].verifyCmd) {
+        targetAttempt = record.recoveryAttempts[i];
         break;
       }
     }
   }
+
+  const verifyCmd = targetAttempt?.verifyCmd;
 
   if (!verifyCmd) {
     throw new UsageError(
@@ -59,7 +64,7 @@ export async function verifyCommand({ context }) {
 
   if (!isJsonMode) {
     const tag = styler.badge('rewind:verify', styler.cyan);
-    stdout.write(`\n${tag} Executing user-approved verification command for Incident #${id}:\n`);
+    stdout.write(`\n${tag} Executing user-approved verification command for Incident #${id} [Attempt #${targetAttempt.id}]:\n`);
     stdout.write(`  ${styler.bold(styler.cyan('$ ' + sanitizeForDisplay(verifyCmd)))}\n\n`);
   }
 
@@ -75,37 +80,39 @@ export async function verifyCommand({ context }) {
     stderrStream
   });
 
-  if (verifyResult.success) {
-    // Assert and transition state to VERIFIED
-    assertValidTransition(record.status, RecoveryStates.VERIFIED, id);
+  const runOutput = (verifyResult.stdout || verifyResult.stderr || '').trim();
 
+  // Atomically record immutable verification run
+  const updated = storage.recordVerificationRun(id, targetAttempt.id, {
+    command: verifyCmd,
+    exitCode: typeof verifyResult.exitCode === 'number' ? verifyResult.exitCode : (verifyResult.success ? 0 : 1),
+    durationMs: verifyResult.durationMs,
+    output: runOutput
+  });
+
+  // Run contradiction check across ledger
+  const conflictReport = storage.getContradictionReport(record.fingerprint);
+
+  if (verifyResult.success) {
     const verifiedAtIso = new Date().toISOString();
-    const updated = storage.updateRecord(id, (current) => ({
-      ...current,
-      status: RecoveryStates.VERIFIED,
-      verification: {
-        verifiedAt: verifiedAtIso,
-        command: verifyCmd,
-        exitCode: 0,
-        durationMs: verifyResult.durationMs,
-        output: verifyResult.stdout || verifyResult.stderr
-      }
-    }));
 
     if (isJsonMode) {
       stdout.write(formatJson({
         status: 'success',
         verified: true,
+        incidentStatus: updated.status,
+        conflicts: conflictReport,
         data: updated
       }) + '\n');
       return 0;
     }
 
     const tag = styler.badge('rewind', styler.green);
-    stdout.write(`\n${tag} ${styler.bold(styler.green('VERIFIED!'))} Incident #${id} successfully validated under recorded conditions.\n`);
+    stdout.write(`\n${tag} ${styler.bold(styler.green('VERIFIED!'))} Incident #${id} [Attempt #${targetAttempt.id}] successfully validated under recorded conditions.\n`);
 
     const box = formatBox('✓ RECOVERY VERIFIED', [
       { label: 'Incident', value: `#${id}` },
+      { label: 'Attempt', value: `#${targetAttempt.id}` },
       { label: 'Verify Command', value: verifyCmd },
       { label: 'Exit Code', value: '0 (Success)' },
       { label: 'Duration', value: `${verifyResult.durationMs}ms` },
@@ -114,44 +121,45 @@ export async function verifyCommand({ context }) {
 
     stdout.write(`\n${box}\n\n`);
     stdout.write(`The verified recovery has been sealed into the ledger.\n`);
-    stdout.write(`Future occurrences of this failure fingerprint will detect this verified fix.\n\n`);
+    stdout.write(`Future occurrences of this failure fingerprint will detect this verified fix.\n`);
+
+    if (conflictReport.hasConflicts) {
+      stdout.write(`\n${formatContradictionSection(conflictReport, styler)}`);
+    }
+
+    stdout.write('\n');
     return 0;
   } else {
-    // Record failed verification attempt without promoting state
-    const updated = storage.updateRecord(id, (current) => ({
-      ...current,
-      verification: {
-        lastAttemptAt: new Date().toISOString(),
-        command: verifyCmd,
-        exitCode: verifyResult.exitCode,
-        durationMs: verifyResult.durationMs,
-        output: verifyResult.stderr || verifyResult.stdout,
-        passed: false
-      }
-    }));
+    const exitCode = typeof verifyResult.exitCode === 'number' ? verifyResult.exitCode : 1;
 
     if (isJsonMode) {
       stdout.write(formatJson({
         status: 'failure',
         verified: false,
+        incidentStatus: updated.status,
+        conflicts: conflictReport,
         data: updated
       }) + '\n');
-      return verifyResult.exitCode || 1;
+      return exitCode;
     }
 
     const tag = styler.badge('rewind', styler.red);
-    stderr.write(`\n${tag} ${styler.bold(styler.red('NOT VERIFIED:'))} Verification command failed with exit code ${verifyResult.exitCode}.\n`);
+    stderr.write(`\n${tag} ${styler.bold(styler.red('NOT VERIFIED:'))} Verification command failed with exit code ${exitCode}.\n`);
 
-    const box = formatBox('✗ VERIFICATION FAILED', [
+    const box = formatBox('✗ VERIFICATION FAILED (Preserved in Negative Memory)', [
       { label: 'Incident', value: `#${id}` },
+      { label: 'Attempt', value: `#${targetAttempt.id} (Marked FAILED)` },
       { label: 'Verify Command', value: verifyCmd },
-      { label: 'Exit Code', value: String(verifyResult.exitCode ?? 1) },
+      { label: 'Exit Code', value: String(exitCode) },
       { label: 'Duration', value: `${verifyResult.durationMs}ms` }
     ], styler, 'error');
 
     stderr.write(`\n${box}\n\n`);
-    stderr.write(`Verification command failed with exit code ${verifyResult.exitCode}.\n`);
-    stderr.write(`Incident #${id} remains in state: ${styler.cyan('FIXED')}. Review the error and adjust your fix.\n\n`);
-    return verifyResult.exitCode || 1;
+    stderr.write(`Attempt #${targetAttempt.id} has been permanently sealed into negative memory as a failed approach.\n`);
+    stderr.write(`Incident #${id} remains in state: ${styler.cyan('OPEN')}.\n`);
+    stderr.write(`To try a new remediation, run: "${styler.cyan(`rewind recover ${id} --change "..." --verify-cmd "..."`)}"\n\n`);
+
+    return exitCode;
   }
 }
+

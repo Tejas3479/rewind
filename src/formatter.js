@@ -150,14 +150,25 @@ export function formatRelativeTime(isoString, now = new Date()) {
 export function formatStatusBadge(status, styler) {
   const s = styler;
   switch (status) {
+    case 'RECOVERED':
     case 'VERIFIED':
-      return s.green(s.bold('VERIFIED'));
+      return s.green(s.bold(status === 'RECOVERED' ? 'RECOVERED' : 'VERIFIED'));
     case 'REGRESSED':
       return s.red(s.bold('REGRESSED'));
+    case 'OPEN':
+      return s.cyan(s.bold('OPEN'));
     case 'FIXED':
       return s.cyan(s.bold('FIXED'));
     case 'SUSPECTED':
       return s.yellow(s.bold('SUSPECTED'));
+    case 'PROPOSED':
+      return s.yellow(s.bold('PROPOSED'));
+    case 'ATTEMPTED':
+      return s.cyan(s.bold('ATTEMPTED'));
+    case 'FAILED':
+      return s.red(s.bold('FAILED'));
+    case 'RESOLVED':
+      return s.blue(s.bold('RESOLVED'));
     case 'OBSERVED':
     default:
       return s.dim(status || 'OBSERVED');

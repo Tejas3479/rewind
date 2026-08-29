@@ -1,25 +1,31 @@
 import { MissingArgumentError } from '../errors.js';
 import { searchRecords } from '../storage/search.js';
 import { formatJson } from '../formatter.js';
-import { RecoveryStates } from '../storage/state.js';
 import { sanitizeForDisplay } from '../sanitizer.js';
 
 /**
  * Returns formatted colored confidence badge.
  *
  * @param {string} confidence
+ * @param {'EXACT_MATCH'|'SIMILAR_MATCH'} matchType
  * @param {import('../formatter.js').createStyler} s
  * @returns {string}
  */
-function formatConfidenceBadge(confidence, s) {
+function formatConfidenceBadge(confidence, matchType, s) {
+  if (matchType === 'EXACT_MATCH') {
+    return confidence === 'VERIFIED'
+      ? s.green(s.bold('[EXACT MATCH: VERIFIED RECOVERY]'))
+      : s.cyan(s.bold('[EXACT MATCH: UNVERIFIED]'));
+  }
+
   switch (confidence) {
     case 'VERIFIED':
-      return s.green(s.bold('[VERIFIED RECOVERY]'));
+      return s.green(s.bold('[SIMILAR: VERIFIED RECOVERY]'));
     case 'LIKELY':
-      return s.cyan(s.bold('[LIKELY PATTERN]'));
+      return s.cyan(s.bold('[SIMILAR: LIKELY PATTERN]'));
     case 'NOT PROVEN':
     default:
-      return s.dim('[NOT PROVEN]');
+      return s.dim('[SIMILAR: NOT PROVEN]');
   }
 }
 
@@ -73,7 +79,7 @@ export async function searchCommand({ context }) {
   for (const match of matches) {
     const rec = match.record;
     const scorePct = `${Math.round(match.score * 100)}%`;
-    const confBadge = formatConfidenceBadge(match.confidence, s);
+    const confBadge = formatConfidenceBadge(match.confidence, match.matchType, s);
     const idBadge = s.bold(`#${match.id}`);
     const fpBadge = s.dim(`[fp: ${rec.fingerprint ? rec.fingerprint.slice(0, 8) : 'none'}]`);
 
@@ -83,15 +89,27 @@ export async function searchCommand({ context }) {
     stdout.write(`  ${s.dim('Match Reason:'.padEnd(16))} ${s.yellow(sanitizeForDisplay(match.reason))}\n`);
 
     // Surface historical recovery evidence
-    if (Array.isArray(rec.recoveries) && rec.recoveries.length > 0) {
-      const last = rec.recoveries[rec.recoveries.length - 1];
-      if (last.cause) stdout.write(`  ${s.dim('Suspected Cause:'.padEnd(18))} ${sanitizeForDisplay(last.cause)}\n`);
-      if (last.change) stdout.write(`  ${s.dim('Historical Fix:'.padEnd(18))} ${sanitizeForDisplay(last.change)}\n`);
-      if (last.verifyCmd) stdout.write(`  ${s.dim('Verify Command:'.padEnd(18))} ${s.cyan(sanitizeForDisplay(last.verifyCmd))}\n`);
+    const attempts = Array.isArray(rec.recoveryAttempts) ? rec.recoveryAttempts : [];
+    const verifiedAttempt = attempts.find(a => a.status === 'VERIFIED') || (attempts.length > 0 ? attempts[attempts.length - 1] : null);
+
+    if (verifiedAttempt) {
+      if (verifiedAttempt.cause) stdout.write(`  ${s.dim('Suspected Cause:'.padEnd(18))} ${sanitizeForDisplay(verifiedAttempt.cause)}\n`);
+      if (verifiedAttempt.change) stdout.write(`  ${s.dim('Remediation Fix:'.padEnd(18))} ${sanitizeForDisplay(verifiedAttempt.change)}\n`);
+      if (verifiedAttempt.verifyCmd) stdout.write(`  ${s.dim('Verify Command:'.padEnd(18))} ${s.cyan(sanitizeForDisplay(verifiedAttempt.verifyCmd))}\n`);
     }
 
-    if (rec.status === RecoveryStates.VERIFIED && rec.verification) {
-      stdout.write(`  ${s.green('✔ Verified under recorded conditions at ' + (rec.verification.verifiedAt || ''))}\n`);
+    if (match.failedAttemptsCount > 0) {
+      stdout.write(`  ${s.dim('Negative Memory:'.padEnd(18))} ${s.yellow(`${match.failedAttemptsCount} failed approach(es) on record (see show ${match.id})`)}\n`);
+    }
+
+    const staleness = storage.getStalenessReport(rec.id);
+    if (staleness && staleness.isStale) {
+      stdout.write(`  ${s.dim('Context Warning:'.padEnd(18))} ${s.yellow('[STALE EVIDENCE — Environment has diverged since verification]')}\n`);
+    }
+
+    const isRecovered = rec.status === 'RECOVERED' || rec.status === 'VERIFIED';
+    if (isRecovered && rec.verification) {
+      stdout.write(`  ${s.green('✔ Verified under recorded conditions')}\n`);
     }
   }
 
@@ -101,3 +119,4 @@ export async function searchCommand({ context }) {
 
   return 0;
 }
+

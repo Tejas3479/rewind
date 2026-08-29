@@ -1,8 +1,9 @@
 import { MissingArgumentError, CliError } from '../errors.js';
 import { formatJson, formatStatusBadge } from '../formatter.js';
-import { RecoveryStates } from '../storage/state.js';
 import { sanitizeForDisplay } from '../sanitizer.js';
 import { normalizeId } from '../storage/store.js';
+import { formatNegativeMemorySection } from '../storage/negative_memory.js';
+import { formatContradictionSection } from '../storage/contradiction.js';
 
 /**
  * Formats full UTC timestamp.
@@ -23,7 +24,8 @@ function formatUtc(isoString) {
 
 /**
  * Handler for `rewind show <id> [options]`.
- * Displays complete inspectable forensic record with clear visual hierarchy.
+ * Displays complete inspectable forensic record with full attempt history,
+ * verification runs, negative memory, staleness analysis, and contradiction alerts.
  *
  * @param {object} params
  * @param {import('../cli.js').CliContext} params.context
@@ -47,10 +49,19 @@ export async function showCommand({ context }) {
     });
   }
 
+  const stalenessReport = storage.getStalenessReport(id);
+  const failedApproaches = storage.getNegativeMemory(record.fingerprint);
+  const conflictReport = storage.getContradictionReport(record.fingerprint);
+
   if (parsedArgs.flags.json) {
     stdout.write(formatJson({
       status: 'success',
-      data: record
+      data: record,
+      intelligence: {
+        staleness: stalenessReport,
+        negativeMemory: failedApproaches,
+        conflicts: conflictReport
+      }
     }) + '\n');
     return 0;
   }
@@ -73,6 +84,9 @@ export async function showCommand({ context }) {
   stdout.write(`  ${s.dim('Working Dir:')}  ${record.cwd}\n`);
   if (record.regressionOf) {
     stdout.write(`  ${s.dim('Regression Of:')} ${s.red(s.bold(`Incident #${record.regressionOf}`))}\n`);
+  }
+  if (record.evidenceHash) {
+    stdout.write(`  ${s.dim('Evidence Hash:')} ${s.dim(record.evidenceHash.slice(0, 16))}...\n`);
   }
   stdout.write('\n');
 
@@ -110,40 +124,61 @@ export async function showCommand({ context }) {
   if (record.environment) {
     stdout.write(`  ${s.dim('Platform:'.padEnd(14))} ${record.environment.platform} (${record.environment.arch}) / OS ${record.environment.osRelease}\n`);
     stdout.write(`  ${s.dim('Runtime:'.padEnd(14))} Node.js ${record.environment.nodeVersion}\n`);
+    if (record.environment.envKeysHash) {
+      stdout.write(`  ${s.dim('Env Keys Hash:'.padEnd(14))} ${s.dim(record.environment.envKeysHash)}\n`);
+    }
   }
   stdout.write('\n');
 
-  // Section 5: Recovery History
-  if (Array.isArray(record.recoveries) && record.recoveries.length > 0) {
-    stdout.write(`${s.bold('RECOVERY ATTEMPTS:')}\n`);
-    for (let i = 0; i < record.recoveries.length; i++) {
-      const rec = record.recoveries[i];
-      stdout.write(`  ${s.bold(`[Attempt #${i + 1}]`)} ${s.dim(`(${formatUtc(rec.timestamp)})`)}\n`);
-      if (rec.cause) stdout.write(`    ${s.dim('Cause:'.padEnd(12))} ${sanitizeForDisplay(rec.cause)}\n`);
-      if (rec.change) stdout.write(`    ${s.dim('Change:'.padEnd(12))} ${sanitizeForDisplay(rec.change)}\n`);
-      if (rec.verifyCmd) stdout.write(`    ${s.dim('Verify:'.padEnd(12))} ${s.cyan(sanitizeForDisplay(rec.verifyCmd))}\n`);
+  // Section 5: Recovery History & Verification Runs
+  const attempts = Array.isArray(record.recoveryAttempts) ? record.recoveryAttempts : [];
+  if (attempts.length > 0) {
+    stdout.write(`${s.bold(`RECOVERY ATTEMPTS (${attempts.length} recorded):`)}\n`);
+    for (const att of attempts) {
+      const attBadge = formatStatusBadge(att.status, s);
+      stdout.write(`  ${s.bold(`[Attempt #${att.id}]`)} ${attBadge} ${s.dim(`(${formatUtc(att.createdAt)})`)}\n`);
+      if (att.cause) stdout.write(`    ${s.dim('Hypothesis:'.padEnd(16))} ${sanitizeForDisplay(att.cause)}\n`);
+      if (att.change) stdout.write(`    ${s.dim('Attempted Fix:'.padEnd(16))} ${sanitizeForDisplay(att.change)}\n`);
+      if (att.verifyCmd) stdout.write(`    ${s.dim('Verify Command:'.padEnd(16))} ${s.cyan(sanitizeForDisplay(att.verifyCmd))}\n`);
+
+      const runs = Array.isArray(att.verificationRuns) ? att.verificationRuns : [];
+      if (runs.length > 0) {
+        stdout.write(`    ${s.dim('Verification Runs:')}\n`);
+        for (const run of runs) {
+          const runBadge = run.result === 'PASSED' ? s.green('✓ PASSED (Exit 0)') : s.red(`✗ FAILED (Exit ${run.exitCode})`);
+          stdout.write(`      • ${runBadge} ${s.dim(`(${run.durationMs}ms at ${formatUtc(run.completedAt)})`)}\n`);
+        }
+      }
+      stdout.write('\n');
     }
-    stdout.write('\n');
   }
 
-  // Section 6: Verification Record
-  if (record.verification) {
-    stdout.write(`${s.bold('VERIFICATION RECORD:')}\n`);
-    const verStatus = record.status === RecoveryStates.VERIFIED
-      ? s.green(s.bold('VERIFIED'))
-      : s.red(s.bold('FAILED'));
-    stdout.write(`  ${s.dim('Status:'.padEnd(14))} ${verStatus}\n`);
-    stdout.write(`  ${s.dim('Command:'.padEnd(14))} ${s.cyan(sanitizeForDisplay(record.verification.command))}\n`);
-    stdout.write(`  ${s.dim('Exit Code:'.padEnd(14))} ${record.verification.exitCode}\n`);
-    if (record.verification.durationMs !== undefined) {
-      stdout.write(`  ${s.dim('Duration:'.padEnd(14))} ${record.verification.durationMs}ms\n`);
+  // Section 6: Known Failed Approaches (Negative Memory)
+  if (failedApproaches.length > 0) {
+    stdout.write(`${formatNegativeMemorySection(failedApproaches, s)}\n`);
+  }
+
+  // Section 7: Environment Staleness Analysis
+  if (stalenessReport && (record.status === 'RECOVERED' || record.status === 'VERIFIED')) {
+    if (stalenessReport.isStale) {
+      stdout.write(`${s.bold(s.yellow('ENVIRONMENT STALENESS ANALYSIS:'))}\n`);
+      stdout.write(`  ${s.yellow('[STALE EVIDENCE]')} The environment has diverged since this recovery was verified:\n`);
+      for (const reason of stalenessReport.reasons) {
+        stdout.write(`    • ${s.dim(reason)}\n`);
+      }
+      stdout.write('\n');
+    } else {
+      stdout.write(`${s.bold(s.green('ENVIRONMENT COMPATIBILITY:'))}\n`);
+      stdout.write(`  ${s.green('✔ Compatible')} Current runtime environment matches verified recovery conditions.\n\n`);
     }
-    if (record.verification.verifiedAt) {
-      stdout.write(`  ${s.dim('Verified At:'.padEnd(14))} ${formatUtc(record.verification.verifiedAt)}\n`);
-    }
-    stdout.write('\n');
+  }
+
+  // Section 8: Evidence Conflicts & Contradictions
+  if (conflictReport && conflictReport.hasConflicts) {
+    stdout.write(`${formatContradictionSection(conflictReport, s)}\n`);
   }
 
   stdout.write(`${divider}\n\n`);
   return 0;
 }
+

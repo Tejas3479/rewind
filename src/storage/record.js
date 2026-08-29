@@ -1,42 +1,108 @@
+import crypto from 'node:crypto';
 import { computeFingerprint } from './fingerprint.js';
-import { RecoveryStates } from './state.js';
+import { IncidentStatus, RecoveryAttemptStatus } from './state.js';
+
+const MAX_OUTPUT_HEAD = 64 * 1024; // 64 KB
+const MAX_OUTPUT_TAIL = 16 * 1024; // 16 KB
 
 /**
- * Storage record data contract.
- * @typedef {object} FailureRecord
- * @property {string} id - Monotonically increasing unique record ID (e.g. "1")
- * @property {string} fingerprint - Deterministic failure hash (16 hex chars)
- * @property {string} command - Target command executable
- * @property {string[]} args - Target command arguments
- * @property {string} fullCommand - Full command string
- * @property {string} cwd - Working directory at time of execution
- * @property {string} startTime - ISO start timestamp
- * @property {string} endTime - ISO end timestamp
- * @property {number} durationMs - Execution duration in milliseconds
- * @property {number|null} exitCode - Child exit code
- * @property {string|null} signal - Termination signal if any
- * @property {string} status - OBSERVED | SUSPECTED | FIXED | VERIFIED | REGRESSED | success
- * @property {string} stdout - Sanitized stdout
- * @property {string} stderr - Sanitized stderr
- * @property {string} stdoutRaw - Raw stdout bytes decoded as UTF-8
- * @property {string} stderrRaw - Raw stderr bytes decoded as UTF-8
- * @property {string} normalizedError - Canonically normalized error text for fingerprinting
- * @property {import('../git.js').GitMetadata} git - Repository metadata
- * @property {object} environment - Safe environment metadata
- * @property {string|null} regressionOf - ID of prior verified incident if this is a regression
- * @property {Array<{ timestamp: string, cause?: string, change?: string, verifyCmd?: string }>} recoveries - Attempted recovery actions
- * @property {{ verifiedAt: string, command: string, exitCode: number, durationMs: number, output: string }|null} verification - Verification execution result
+ * Truncates large string output cleanly preserving head and tail,
+ * and computing a deterministic SHA-256 hash of the complete text.
+ *
+ * @param {string} text
+ * @returns {{ bounded: string, hash: string, truncated: boolean }}
+ */
+export function boundOutput(text) {
+  if (!text || typeof text !== 'string') {
+    return {
+      bounded: '',
+      hash: crypto.createHash('sha256').update('', 'utf8').digest('hex'),
+      truncated: false
+    };
+  }
+
+  const hash = crypto.createHash('sha256').update(text, 'utf8').digest('hex');
+
+  if (text.length <= MAX_OUTPUT_HEAD + MAX_OUTPUT_TAIL) {
+    return {
+      bounded: text,
+      hash,
+      truncated: false
+    };
+  }
+
+  const head = text.slice(0, MAX_OUTPUT_HEAD);
+  const tail = text.slice(-MAX_OUTPUT_TAIL);
+  const omittedCount = text.length - MAX_OUTPUT_HEAD - MAX_OUTPUT_TAIL;
+  const bounded = `${head}\n... [${omittedCount} bytes omitted; full output SHA-256: ${hash}] ...\n${tail}`;
+
+  return {
+    bounded,
+    hash,
+    truncated: true
+  };
+}
+
+/**
+ * @typedef {object} VerificationRun
+ * @property {number} id - Run number: 1, 2...
+ * @property {string} startedAt - ISO timestamp
+ * @property {string} completedAt - ISO timestamp
+ * @property {string} command - Verification command
+ * @property {number} exitCode - Exit code
+ * @property {number} durationMs - Duration in ms
+ * @property {string} output - Output snippet
+ * @property {string} outputHash - Complete output hash
+ * @property {string} environmentFingerprint - Hash of environment at time of run
+ * @property {'PASSED'|'FAILED'} result - Verification outcome
  */
 
 /**
- * Creates a structured FailureRecord from a command execution capture result.
+ * @typedef {object} RecoveryAttempt
+ * @property {number} id - Attempt ID: 1, 2, 3...
+ * @property {string} createdAt - ISO timestamp
+ * @property {string|null} cause - Root cause hypothesis
+ * @property {string|null} change - Remediation description
+ * @property {string|null} verifyCmd - Verification command
+ * @property {string} status - PROPOSED | ATTEMPTED | FAILED | VERIFIED
+ * @property {VerificationRun[]} verificationRuns - Complete history of verification runs
+ */
+
+/**
+ * @typedef {object} IncidentRecord
+ * @property {string} id - Monotonically increasing unique record ID (e.g. "1")
+ * @property {string} fingerprint - Deterministic failure hash (16 hex chars)
+ * @property {string} status - OBSERVED | OPEN | RECOVERED | REGRESSED | RESOLVED | success
+ * @property {string} command - Target command executable
+ * @property {string[]} args - Target command arguments
+ * @property {string} fullCommand - Full command string
+ * @property {string} cwd - Working directory
+ * @property {string} startTime - ISO start timestamp
+ * @property {string} endTime - ISO end timestamp
+ * @property {number} durationMs - Duration in milliseconds
+ * @property {number|null} exitCode - Exit code
+ * @property {string|null} signal - Termination signal
+ * @property {string} stdout - Sanitized bounded stdout
+ * @property {string} stderr - Sanitized bounded stderr
+ * @property {string} evidenceHash - SHA-256 of complete raw output
+ * @property {string} normalizedError - Normalized error signature
+ * @property {import('../git.js').GitMetadata} git - Git metadata
+ * @property {import('../environment.js').EnvironmentSnapshot} environment - Environment snapshot
+ * @property {string|null} regressionOf - Prior verified incident ID if REGRESSED
+ * @property {RecoveryAttempt[]} recoveryAttempts - Chronological remediation attempts
+ * @property {Array<{ timestamp: string, cause?: string, change?: string, verifyCmd?: string }>} [recoveries] - Legacy compat alias
+ * @property {object|null} [verification] - Legacy compat alias
+ */
+
+/**
+ * Creates a structured IncidentRecord from a command execution capture result.
  *
- * @param {string} id - Record identifier
+ * @param {string} id
  * @param {import('../capture.js').CaptureRecord} captureResult
  * @param {object} [options]
- * @param {string} [options.initialState] - Initial trust loop state
- * @param {string|null} [options.regressionOf] - Prior verified incident ID
- * @returns {FailureRecord}
+ * @param {string} [options.initialState]
+ * @param {string|null} [options.regressionOf]
+ * @returns {IncidentRecord}
  */
 export function createRecord(id, captureResult, options = {}) {
   const { fingerprint, normalizedError } = computeFingerprint({
@@ -48,11 +114,19 @@ export function createRecord(id, captureResult, options = {}) {
     stdout: captureResult.stdout
   });
 
-  const status = options.initialState || (captureResult.success ? 'success' : RecoveryStates.OBSERVED);
+  const boundedStdout = boundOutput(captureResult.stdout || '');
+  const boundedStderr = boundOutput(captureResult.stderr || '');
 
-  return Object.freeze({
+  // Combined evidence hash
+  const rawCombined = `${captureResult.stdoutRaw || captureResult.stdout || ''}\n${captureResult.stderrRaw || captureResult.stderr || ''}`;
+  const evidenceHash = crypto.createHash('sha256').update(rawCombined, 'utf8').digest('hex');
+
+  const status = options.initialState || (captureResult.success ? 'success' : IncidentStatus.OBSERVED);
+
+  const baseRecord = {
     id: String(id),
     fingerprint,
+    status,
     command: captureResult.command,
     args: [...(captureResult.args || [])],
     fullCommand: captureResult.fullCommand,
@@ -62,22 +136,121 @@ export function createRecord(id, captureResult, options = {}) {
     durationMs: captureResult.durationMs,
     exitCode: captureResult.exitCode,
     signal: captureResult.signal,
-    status,
-    stdout: captureResult.stdout,
-    stderr: captureResult.stderr,
+    stdout: boundedStdout.bounded,
+    stderr: boundedStderr.bounded,
     stdoutRaw: captureResult.stdoutRaw,
     stderrRaw: captureResult.stderrRaw,
+    evidenceHash,
     normalizedError,
     git: { ...captureResult.git },
     environment: { ...captureResult.environment },
     regressionOf: options.regressionOf || null,
+    recoveryAttempts: [],
+    // Legacy compatibility fields
     recoveries: [],
     verification: null
-  });
+  };
+
+  return Object.freeze(baseRecord);
 }
 
 /**
- * Validates whether an unparsed or parsed object conforms to the FailureRecord schema.
+ * Migrates a record loaded from disk to the current schema if necessary.
+ *
+ * @param {Record<string, any>} record
+ * @returns {IncidentRecord}
+ */
+export function normalizeRecordToCurrentSchema(record) {
+  if (!record || typeof record !== 'object') return record;
+
+  const copy = { ...record };
+
+  // Ensure recoveryAttempts is present
+  if (!Array.isArray(copy.recoveryAttempts)) {
+    copy.recoveryAttempts = [];
+
+    // Migrate legacy recoveries array if present
+    if (Array.isArray(copy.recoveries) && copy.recoveries.length > 0) {
+      for (let i = 0; i < copy.recoveries.length; i++) {
+        const legacy = copy.recoveries[i];
+        const isLast = i === copy.recoveries.length - 1;
+        const runs = [];
+
+        let attemptStatus = RecoveryAttemptStatus.PROPOSED;
+        if (isLast && copy.verification) {
+          const runPassed = copy.status === 'VERIFIED' || copy.status === IncidentStatus.RECOVERED || copy.verification.exitCode === 0;
+          attemptStatus = runPassed ? RecoveryAttemptStatus.VERIFIED : RecoveryAttemptStatus.FAILED;
+
+          runs.push({
+            id: 1,
+            startedAt: copy.verification.verifiedAt || copy.verification.lastAttemptAt || legacy.timestamp || copy.startTime,
+            completedAt: copy.verification.verifiedAt || copy.verification.lastAttemptAt || legacy.timestamp || copy.endTime,
+            command: copy.verification.command || legacy.verifyCmd || '',
+            exitCode: copy.verification.exitCode ?? (runPassed ? 0 : 1),
+            durationMs: copy.verification.durationMs || 0,
+            output: copy.verification.output || '',
+            outputHash: crypto.createHash('sha256').update(copy.verification.output || '', 'utf8').digest('hex'),
+            environmentFingerprint: copy.environment?.fingerprint || '',
+            result: runPassed ? 'PASSED' : 'FAILED'
+          });
+        }
+
+        copy.recoveryAttempts.push({
+          id: i + 1,
+          createdAt: legacy.timestamp || copy.startTime,
+          cause: legacy.cause || null,
+          change: legacy.change || null,
+          verifyCmd: legacy.verifyCmd || null,
+          status: attemptStatus,
+          verificationRuns: runs
+        });
+      }
+    }
+  }
+
+  // Normalize legacy status string
+  if (copy.status === 'FIXED' || copy.status === 'SUSPECTED') {
+    copy.status = IncidentStatus.OPEN;
+  } else if (copy.status === 'VERIFIED') {
+    copy.status = IncidentStatus.RECOVERED;
+  }
+
+  // Keep legacy compat properties in sync
+  copy.recoveries = copy.recoveryAttempts.map(a => ({
+    timestamp: a.createdAt,
+    cause: a.cause,
+    change: a.change,
+    verifyCmd: a.verifyCmd
+  }));
+
+  // Find latest verification if any
+  let latestRun = null;
+  for (const attempt of copy.recoveryAttempts) {
+    if (Array.isArray(attempt.verificationRuns)) {
+      for (const run of attempt.verificationRuns) {
+        if (!latestRun || run.startedAt > latestRun.startedAt) {
+          latestRun = run;
+        }
+      }
+    }
+  }
+
+  if (latestRun) {
+    copy.verification = {
+      verifiedAt: latestRun.result === 'PASSED' ? latestRun.completedAt : undefined,
+      lastAttemptAt: latestRun.result === 'FAILED' ? latestRun.completedAt : undefined,
+      command: latestRun.command,
+      exitCode: latestRun.exitCode,
+      durationMs: latestRun.durationMs,
+      output: latestRun.output
+    };
+  }
+
+  return Object.freeze(copy);
+}
+
+/**
+ * Validates whether an unparsed or parsed object conforms to the FailureRecord / IncidentRecord schema.
  *
  * @param {unknown} obj
  * @returns {boolean}
@@ -102,3 +275,4 @@ export function isValidRecord(obj) {
     typeof record.stderr === 'string'
   );
 }
+

@@ -1,9 +1,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { createRecord, isValidRecord } from './record.js';
-import { RecoveryStates } from './state.js';
+import { createRecord, isValidRecord, normalizeRecordToCurrentSchema } from './record.js';
+import { IncidentStatus, RecoveryAttemptStatus } from './state.js';
 import { computeFingerprint } from './fingerprint.js';
+import { evaluateStaleness } from './staleness.js';
+import { extractNegativeMemory } from './negative_memory.js';
+import { analyzeEvidenceConflicts } from './contradiction.js';
 import { CliError } from '../errors.js';
 
 /**
@@ -27,7 +30,7 @@ export class StorageEngine {
     this.tmpDir = path.join(this.ledgerDir, 'tmp');
     this.quarantineDir = path.join(this.ledgerDir, 'quarantine');
 
-    /** @type {Map<string, import('./record.js').FailureRecord>} */
+    /** @type {Map<string, import('./record.js').IncidentRecord>} */
     this.index = new Map();
     this.highestId = 0;
     /** @type {Array<{ file: string, reason: string, quarantinedAt: string }>} */
@@ -78,7 +81,7 @@ export class StorageEngine {
 
   /**
    * Scans records directory, quarantines any corrupt or malformed files,
-   * and rebuilds the in-memory lookup index.
+   * normalizes schemas to the current architecture, and rebuilds the in-memory index.
    */
   rebuildIndex() {
     this.index.clear();
@@ -130,10 +133,11 @@ export class StorageEngine {
         continue;
       }
 
-      // Valid record: store in in-memory index
-      this.index.set(parsed.id, Object.freeze(parsed));
+      // Valid record: normalize to current schema and store in memory
+      const normalized = normalizeRecordToCurrentSchema(parsed);
+      this.index.set(normalized.id, normalized);
 
-      const numId = Number.parseInt(parsed.id, 10);
+      const numId = Number.parseInt(normalized.id, 10);
       if (!Number.isNaN(numId) && numId > this.highestId) {
         this.highestId = numId;
       }
@@ -177,7 +181,7 @@ export class StorageEngine {
    * Finds all records with an exact matching fingerprint.
    *
    * @param {string} fingerprint
-   * @returns {Array<import('./record.js').FailureRecord>}
+   * @returns {Array<import('./record.js').IncidentRecord>}
    */
   findByFingerprint(fingerprint) {
     if (!fingerprint) return [];
@@ -191,17 +195,18 @@ export class StorageEngine {
   }
 
   /**
-   * Searches for a prior record that reached the VERIFIED state with the same fingerprint.
+   * Searches for a prior record that reached the RECOVERED / VERIFIED state with the same fingerprint.
    *
    * @param {string} fingerprint
-   * @returns {import('./record.js').FailureRecord|null}
+   * @returns {import('./record.js').IncidentRecord|null}
    */
   findVerifiedByFingerprint(fingerprint) {
     if (!fingerprint) return null;
     let latestVerified = null;
 
     for (const record of this.index.values()) {
-      if (record.fingerprint === fingerprint && record.status === RecoveryStates.VERIFIED) {
+      const isRecovered = record.status === IncidentStatus.RECOVERED || record.status === 'VERIFIED';
+      if (record.fingerprint === fingerprint && isRecovered) {
         if (!latestVerified || Number(record.id) > Number(latestVerified.id)) {
           latestVerified = record;
         }
@@ -217,7 +222,7 @@ export class StorageEngine {
    *
    * @param {import('../capture.js').CaptureRecord} captureResult
    * @param {object} [options]
-   * @returns {import('./record.js').FailureRecord}
+   * @returns {import('./record.js').IncidentRecord}
    */
   saveRecord(captureResult, options = {}) {
     if (!this.initialized) {
@@ -242,10 +247,10 @@ export class StorageEngine {
 
       const priorVerified = this.findVerifiedByFingerprint(fingerprint);
       if (priorVerified) {
-        initialState = RecoveryStates.REGRESSED;
+        initialState = IncidentStatus.REGRESSED;
         regressionOf = priorVerified.id;
       } else {
-        initialState = RecoveryStates.OBSERVED;
+        initialState = IncidentStatus.OBSERVED;
       }
     }
 
@@ -286,8 +291,8 @@ export class StorageEngine {
    * Atomically updates an existing record on disk and in memory.
    *
    * @param {string|number} id
-   * @param {(current: import('./record.js').FailureRecord) => import('./record.js').FailureRecord} updaterFn
-   * @returns {import('./record.js').FailureRecord}
+   * @param {(current: import('./record.js').IncidentRecord) => import('./record.js').IncidentRecord} updaterFn
+   * @returns {import('./record.js').IncidentRecord}
    */
   updateRecord(id, updaterFn) {
     if (!this.initialized) {
@@ -317,7 +322,8 @@ export class StorageEngine {
       throw new CliError(`Record update failed schema validation for Incident #${strId}.`, { code: 'ERR_VALIDATION' });
     }
 
-    const frozen = Object.freeze(updated);
+    const normalized = normalizeRecordToCurrentSchema(updated);
+    const frozen = Object.freeze(normalized);
     const jsonContent = JSON.stringify(frozen, null, 2);
 
     // 1. Atomic write to tmp with 0o600 permissions
@@ -343,11 +349,133 @@ export class StorageEngine {
   }
 
   /**
+   * Appends a new recovery attempt to an incident record.
+   *
+   * @param {string|number} id
+   * @param {object} attemptData
+   * @param {string|null} [attemptData.cause]
+   * @param {string|null} [attemptData.change]
+   * @param {string|null} [attemptData.verifyCmd]
+   * @returns {import('./record.js').IncidentRecord}
+   */
+  addRecoveryAttempt(id, attemptData) {
+    return this.updateRecord(id, (current) => {
+      const currentAttempts = Array.isArray(current.recoveryAttempts) ? current.recoveryAttempts : [];
+      const newAttemptId = currentAttempts.length + 1;
+
+      const newAttempt = {
+        id: newAttemptId,
+        createdAt: new Date().toISOString(),
+        cause: attemptData.cause || null,
+        change: attemptData.change || null,
+        verifyCmd: attemptData.verifyCmd || null,
+        status: RecoveryAttemptStatus.PROPOSED,
+        verificationRuns: []
+      };
+
+      return {
+        ...current,
+        status: IncidentStatus.OPEN,
+        recoveryAttempts: [...currentAttempts, newAttempt]
+      };
+    });
+  }
+
+  /**
+   * Records a verification execution run on a specific recovery attempt.
+   *
+   * @param {string|number} id
+   * @param {number} attemptId
+   * @param {object} runData
+   * @param {string} runData.command
+   * @param {number} runData.exitCode
+   * @param {number} runData.durationMs
+   * @param {string} runData.output
+   * @param {string} [runData.environmentFingerprint]
+   * @returns {import('./record.js').IncidentRecord}
+   */
+  recordVerificationRun(id, attemptId, runData) {
+    return this.updateRecord(id, (current) => {
+      const currentAttempts = Array.isArray(current.recoveryAttempts) ? [...current.recoveryAttempts] : [];
+      const attemptIndex = currentAttempts.findIndex(a => a.id === attemptId);
+
+      if (attemptIndex === -1) {
+        throw new CliError(`Attempt #${attemptId} not found in Incident #${id}.`);
+      }
+
+      const targetAttempt = { ...currentAttempts[attemptIndex] };
+      const currentRuns = Array.isArray(targetAttempt.verificationRuns) ? targetAttempt.verificationRuns : [];
+      const newRunId = currentRuns.length + 1;
+      const isPassed = runData.exitCode === 0;
+
+      const newRun = {
+        id: newRunId,
+        startedAt: new Date(Date.now() - (runData.durationMs || 0)).toISOString(),
+        completedAt: new Date().toISOString(),
+        command: runData.command,
+        exitCode: runData.exitCode,
+        durationMs: runData.durationMs || 0,
+        output: runData.output || '',
+        outputHash: crypto.createHash('sha256').update(runData.output || '', 'utf8').digest('hex'),
+        environmentFingerprint: runData.environmentFingerprint || current.environment?.fingerprint || '',
+        result: isPassed ? 'PASSED' : 'FAILED'
+      };
+
+      targetAttempt.status = isPassed ? RecoveryAttemptStatus.VERIFIED : RecoveryAttemptStatus.FAILED;
+      targetAttempt.verificationRuns = [...currentRuns, newRun];
+      currentAttempts[attemptIndex] = targetAttempt;
+
+      const updatedIncidentStatus = isPassed ? IncidentStatus.RECOVERED : current.status;
+
+      return {
+        ...current,
+        status: updatedIncidentStatus,
+        recoveryAttempts: currentAttempts
+      };
+    });
+  }
+
+  /**
+   * Evaluates staleness of a historical record against the current environment.
+   *
+   * @param {string|number} id
+   * @param {import('../environment.js').EnvironmentSnapshot} [currentEnv]
+   * @param {import('../git.js').GitMetadata} [currentGit]
+   * @returns {import('./staleness.js').StalenessEvaluation}
+   */
+  getStalenessReport(id, currentEnv, currentGit) {
+    const record = this.getRecord(id);
+    return evaluateStaleness(record, currentEnv, currentGit);
+  }
+
+  /**
+   * Retrieves all failed remediation attempts for a failure fingerprint.
+   *
+   * @param {string} fingerprint
+   * @returns {import('./negative_memory.js').FailedApproach[]}
+   */
+  getNegativeMemory(fingerprint) {
+    const matching = this.findByFingerprint(fingerprint);
+    return extractNegativeMemory(matching);
+  }
+
+  /**
+   * Detects conflicting or divergent verification evidence for a failure fingerprint.
+   *
+   * @param {string} fingerprint
+   * @returns {import('./contradiction.js').EvidenceConflictReport}
+   */
+  getContradictionReport(fingerprint) {
+    const matching = this.findByFingerprint(fingerprint);
+    return analyzeEvidenceConflicts(fingerprint, matching);
+  }
+
+  /**
    * Retrieves a record by ID from the in-memory index.
    * Strictly validates numeric ID to prevent path traversal attempts.
    *
    * @param {string|number} id
-   * @returns {import('./record.js').FailureRecord|null}
+   * @returns {import('./record.js').IncidentRecord|null}
    */
   getRecord(id) {
     if (!this.initialized) {
@@ -363,7 +491,7 @@ export class StorageEngine {
   /**
    * Returns all stored records sorted by numeric ID / creation order.
    *
-   * @returns {Array<import('./record.js').FailureRecord>}
+   * @returns {Array<import('./record.js').IncidentRecord>}
    */
   listRecords() {
     if (!this.initialized) {
@@ -388,3 +516,4 @@ export class StorageEngine {
     return [...this.quarantined];
   }
 }
+

@@ -5,7 +5,14 @@ import os from 'node:os';
 import fs from 'node:fs';
 import { runCLI } from '../src/cli.js';
 import { StorageEngine } from '../src/storage/store.js';
-import { RecoveryStates, isValidTransition } from '../src/storage/state.js';
+import {
+  IncidentStatus,
+  RecoveryAttemptStatus,
+  RecoveryStates,
+  isValidIncidentTransition,
+  isValidAttemptTransition,
+  isValidTransition
+} from '../src/storage/state.js';
 
 function createMockIO({ env = {}, isTTY = false, cwd = process.cwd() } = {}) {
   let stdoutData = '';
@@ -41,18 +48,24 @@ function createMockIO({ env = {}, isTTY = false, cwd = process.cwd() } = {}) {
 
 describe('Trust Loop State Machine & Verification (src/storage/state.js)', () => {
   test('validates legal and illegal state transitions', () => {
-    // Valid transitions
-    assert.equal(isValidTransition(RecoveryStates.OBSERVED, RecoveryStates.SUSPECTED), true);
-    assert.equal(isValidTransition(RecoveryStates.OBSERVED, RecoveryStates.FIXED), true);
-    assert.equal(isValidTransition(RecoveryStates.SUSPECTED, RecoveryStates.FIXED), true);
-    assert.equal(isValidTransition(RecoveryStates.FIXED, RecoveryStates.VERIFIED), true);
-    assert.equal(isValidTransition(RecoveryStates.VERIFIED, RecoveryStates.REGRESSED), true);
-    assert.equal(isValidTransition(RecoveryStates.REGRESSED, RecoveryStates.FIXED), true);
+    // Valid incident transitions
+    assert.equal(isValidIncidentTransition(IncidentStatus.OBSERVED, IncidentStatus.OPEN), true);
+    assert.equal(isValidIncidentTransition(IncidentStatus.OPEN, IncidentStatus.RECOVERED), true);
+    assert.equal(isValidIncidentTransition(IncidentStatus.RECOVERED, IncidentStatus.OPEN), true);
+    assert.equal(isValidIncidentTransition(IncidentStatus.REGRESSED, IncidentStatus.OPEN), true);
 
-    // Illegal transitions
-    assert.equal(isValidTransition(RecoveryStates.OBSERVED, RecoveryStates.VERIFIED), false);
-    assert.equal(isValidTransition(RecoveryStates.VERIFIED, RecoveryStates.SUSPECTED), false);
-    assert.equal(isValidTransition(RecoveryStates.VERIFIED, RecoveryStates.FIXED), false);
+    // Illegal incident transitions
+    assert.equal(isValidIncidentTransition(IncidentStatus.OBSERVED, IncidentStatus.RECOVERED), false);
+    assert.equal(isValidIncidentTransition(IncidentStatus.OBSERVED, 'UNKNOWN_STATE'), false);
+
+    // Valid recovery attempt transitions
+    assert.equal(isValidAttemptTransition(RecoveryAttemptStatus.PROPOSED, RecoveryAttemptStatus.ATTEMPTED), true);
+    assert.equal(isValidAttemptTransition(RecoveryAttemptStatus.ATTEMPTED, RecoveryAttemptStatus.VERIFIED), true);
+    assert.equal(isValidAttemptTransition(RecoveryAttemptStatus.ATTEMPTED, RecoveryAttemptStatus.FAILED), true);
+
+    // Illegal recovery attempt transitions (terminal states cannot transition)
+    assert.equal(isValidAttemptTransition(RecoveryAttemptStatus.VERIFIED, RecoveryAttemptStatus.FAILED), false);
+    assert.equal(isValidAttemptTransition(RecoveryAttemptStatus.FAILED, RecoveryAttemptStatus.VERIFIED), false);
   });
 
   test('executes complete Trust Loop: OBSERVED -> SUSPECTED -> FIXED -> VERIFIED -> REGRESSED', async () => {
@@ -73,7 +86,7 @@ describe('Trust Loop State Machine & Verification (src/storage/state.js)', () =>
       assert.equal(inc1.status, RecoveryStates.OBSERVED);
       assert.ok(inc1.fingerprint);
 
-      // Step 2: Record suspected cause -> transitions to SUSPECTED
+      // Step 2: Record suspected cause -> transitions to OPEN/SUSPECTED
       const mock2 = createMockIO({ cwd: tmpDir });
       const code2 = await runCLI([rootFlag, 'recover', '1', '--cause', 'Token validation failed'], mock2.io);
       assert.equal(code2, 0);
@@ -81,10 +94,10 @@ describe('Trust Loop State Machine & Verification (src/storage/state.js)', () =>
       store.rebuildIndex();
       const inc1Suspected = store.getRecord('1');
       assert.equal(inc1Suspected.status, RecoveryStates.SUSPECTED);
-      assert.equal(inc1Suspected.recoveries.length, 1);
-      assert.equal(inc1Suspected.recoveries[0].cause, 'Token validation failed');
+      assert.equal(inc1Suspected.recoveryAttempts.length, 1);
+      assert.equal(inc1Suspected.recoveryAttempts[0].cause, 'Token validation failed');
 
-      // Step 3: Record change and explicit verification command -> transitions to FIXED
+      // Step 3: Record change and explicit verification command -> transitions to FIXED/OPEN
       const mock3 = createMockIO({ cwd: tmpDir });
       const code3 = await runCLI([
         rootFlag,
@@ -100,10 +113,10 @@ describe('Trust Loop State Machine & Verification (src/storage/state.js)', () =>
       store.rebuildIndex();
       const inc1Fixed = store.getRecord('1');
       assert.equal(inc1Fixed.status, RecoveryStates.FIXED);
-      assert.equal(inc1Fixed.recoveries.length, 2);
-      assert.equal(inc1Fixed.recoveries[1].change, 'Added missing token check');
+      assert.equal(inc1Fixed.recoveryAttempts.length, 2);
+      assert.equal(inc1Fixed.recoveryAttempts[1].change, 'Added missing token check');
 
-      // Step 4: Execute rewind verify 1 -> transitions to VERIFIED
+      // Step 4: Execute rewind verify 1 -> transitions to VERIFIED/RECOVERED
       const mock4 = createMockIO({ cwd: tmpDir });
       const code4 = await runCLI([rootFlag, 'verify', '1'], mock4.io);
       assert.equal(code4, 0);
@@ -165,7 +178,7 @@ describe('Trust Loop State Machine & Verification (src/storage/state.js)', () =>
       const store = new StorageEngine(path.join(tmpDir, '.rewind')).init();
       const record = store.getRecord('1');
       assert.equal(record.status, RecoveryStates.FIXED); // Did NOT promote to VERIFIED
-      assert.equal(record.verification.passed, false);
+      assert.equal(record.recoveryAttempts[0].status, 'FAILED'); // Preserved in negative memory
       assert.equal(record.verification.exitCode, 44);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -214,7 +227,7 @@ describe('Trust Loop State Machine & Verification (src/storage/state.js)', () =>
       const mock4 = createMockIO({ cwd: tmpDir });
       const code4 = await runCLI([rootFlag, 'verify', '1'], mock4.io);
       assert.equal(code4, 2);
-      assert.ok(mock4.getStderr().includes('is already in state VERIFIED'));
+      assert.ok(mock4.getStderr().includes('is already in state'));
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }

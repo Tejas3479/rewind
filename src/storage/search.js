@@ -1,4 +1,5 @@
-import { RecoveryStates } from './state.js';
+import { IncidentStatus } from './state.js';
+import { extractNegativeMemory } from './negative_memory.js';
 
 const STOP_WORDS = new Set([
   'the', 'a', 'an', 'in', 'on', 'at', 'of', 'to', 'is', 'for', 'and', 'or', 'it', 'by', 'with', 'from', 'as', 'be', 'this', 'that'
@@ -46,36 +47,41 @@ function intersection(setA, setB) {
  * @typedef {object} SearchMatch
  * @property {string} id - Incident ID
  * @property {number} score - Similarity score in [0.0, 1.0]
- * @property {string} confidence - 'VERIFIED' | 'LIKELY' | 'NOT PROVEN'
+ * @property {'EXACT_MATCH'|'SIMILAR_MATCH'} matchType - Strict match taxonomy
+ * @property {'VERIFIED'|'LIKELY'|'NOT PROVEN'} confidence - Evidence confidence
  * @property {string} status - Incident trust loop status
  * @property {string} reason - Inspectable explanation for similarity score
  * @property {string[]} matchedTokens - Tokens from query matching the record
- * @property {import('./record.js').FailureRecord} record - The full incident record
+ * @property {number} failedAttemptsCount - Number of failed recovery attempts
+ * @property {import('./record.js').IncidentRecord} record - The full incident record
  */
 
 /**
  * Scores a single record against a search query using a transparent, deterministic multi-factor model.
  *
  * @param {string} query
- * @param {import('./record.js').FailureRecord} record
+ * @param {import('./record.js').IncidentRecord} record
  * @returns {SearchMatch}
  */
 export function scoreRecord(query, record) {
   const cleanQuery = query.trim().toLowerCase();
   const fp = (record.fingerprint || '').toLowerCase();
+  const isRecovered = record.status === IncidentStatus.RECOVERED || record.status === 'VERIFIED';
+  const failedAttempts = extractNegativeMemory([record]);
 
   // 1. Tier 1: Exact Fingerprint Match
   if (fp && (cleanQuery === fp || fp.startsWith(cleanQuery) || cleanQuery.includes(fp))) {
-    const isVerified = record.status === RecoveryStates.VERIFIED;
     return {
       id: record.id,
       score: 1.0,
-      confidence: isVerified ? 'VERIFIED' : 'LIKELY',
+      matchType: 'EXACT_MATCH',
+      confidence: isRecovered ? 'VERIFIED' : 'LIKELY',
       status: record.status,
-      reason: isVerified
+      reason: isRecovered
         ? 'Exact fingerprint match — verified recovery exists under recorded conditions'
         : 'Exact fingerprint match — historical evidence exists but fix is not yet verified',
       matchedTokens: [fp],
+      failedAttemptsCount: failedAttempts.length,
       record
     };
   }
@@ -85,10 +91,12 @@ export function scoreRecord(query, record) {
     return {
       id: record.id,
       score: 0.0,
+      matchType: 'SIMILAR_MATCH',
       confidence: 'NOT PROVEN',
       status: record.status,
       reason: 'Empty or non-distinctive search query',
       matchedTokens: [],
+      failedAttemptsCount: failedAttempts.length,
       record
     };
   }
@@ -106,10 +114,12 @@ export function scoreRecord(query, record) {
     return {
       id: record.id,
       score: 0.0,
+      matchType: 'SIMILAR_MATCH',
       confidence: 'NOT PROVEN',
       status: record.status,
       reason: 'No matching tokens found',
       matchedTokens: [],
+      failedAttemptsCount: failedAttempts.length,
       record
     };
   }
@@ -135,9 +145,9 @@ export function scoreRecord(query, record) {
   const score = Math.min(1.0, Math.round(rawScore * 100) / 100);
 
   // Determine trust loop confidence:
-  // Critical Trust Rule: Unverified records NEVER have VERIFIED confidence
+  // Critical Trust Invariant: Unverified records NEVER have VERIFIED confidence
   let confidence = 'NOT PROVEN';
-  if (score >= 0.40 && record.status === RecoveryStates.VERIFIED) {
+  if (score >= 0.40 && isRecovered) {
     confidence = 'VERIFIED';
   } else if (score >= 0.35) {
     confidence = 'LIKELY';
@@ -157,10 +167,12 @@ export function scoreRecord(query, record) {
   return {
     id: record.id,
     score,
+    matchType: 'SIMILAR_MATCH',
     confidence,
     status: record.status,
     reason,
     matchedTokens: Array.from(matchedTokens),
+    failedAttemptsCount: failedAttempts.length,
     record
   };
 }
@@ -169,7 +181,7 @@ export function scoreRecord(query, record) {
  * Searches and ranks ledger records against a query string.
  *
  * @param {string} query
- * @param {Array<import('./record.js').FailureRecord>} records
+ * @param {Array<import('./record.js').IncidentRecord>} records
  * @param {object} [options]
  * @param {number} [options.minScore=0.15]
  * @param {number} [options.limit]
@@ -204,3 +216,4 @@ export function searchRecords(query, records = [], options = {}) {
 
   return matches;
 }
+
