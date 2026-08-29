@@ -1,4 +1,5 @@
 import { computeFingerprint } from './fingerprint.js';
+import { RecoveryStates } from './state.js';
 
 /**
  * Storage record data contract.
@@ -14,7 +15,7 @@ import { computeFingerprint } from './fingerprint.js';
  * @property {number} durationMs - Execution duration in milliseconds
  * @property {number|null} exitCode - Child exit code
  * @property {string|null} signal - Termination signal if any
- * @property {string} status - 'failed' | 'success'
+ * @property {string} status - OBSERVED | SUSPECTED | FIXED | VERIFIED | REGRESSED | success
  * @property {string} stdout - Sanitized stdout
  * @property {string} stderr - Sanitized stderr
  * @property {string} stdoutRaw - Raw stdout bytes decoded as UTF-8
@@ -22,8 +23,9 @@ import { computeFingerprint } from './fingerprint.js';
  * @property {string} normalizedError - Canonically normalized error text for fingerprinting
  * @property {import('../git.js').GitMetadata} git - Repository metadata
  * @property {object} environment - Safe environment metadata
- * @property {Array<object>} recoveries - Attempted recovery actions
- * @property {object|null} verification - Verification state and command
+ * @property {string|null} regressionOf - ID of prior verified incident if this is a regression
+ * @property {Array<{ timestamp: string, cause?: string, change?: string, verifyCmd?: string }>} recoveries - Attempted recovery actions
+ * @property {{ verifiedAt: string, command: string, exitCode: number, durationMs: number, output: string }|null} verification - Verification execution result
  */
 
 /**
@@ -31,9 +33,12 @@ import { computeFingerprint } from './fingerprint.js';
  *
  * @param {string} id - Record identifier
  * @param {import('../capture.js').CaptureRecord} captureResult
+ * @param {object} [options]
+ * @param {string} [options.initialState] - Initial trust loop state
+ * @param {string|null} [options.regressionOf] - Prior verified incident ID
  * @returns {FailureRecord}
  */
-export function createRecord(id, captureResult) {
+export function createRecord(id, captureResult, options = {}) {
   const { fingerprint, normalizedError } = computeFingerprint({
     command: captureResult.command,
     args: captureResult.args,
@@ -42,6 +47,8 @@ export function createRecord(id, captureResult) {
     stderr: captureResult.stderr,
     stdout: captureResult.stdout
   });
+
+  const status = options.initialState || (captureResult.success ? 'success' : RecoveryStates.OBSERVED);
 
   return Object.freeze({
     id: String(id),
@@ -55,7 +62,7 @@ export function createRecord(id, captureResult) {
     durationMs: captureResult.durationMs,
     exitCode: captureResult.exitCode,
     signal: captureResult.signal,
-    status: captureResult.success ? 'success' : 'failed',
+    status,
     stdout: captureResult.stdout,
     stderr: captureResult.stderr,
     stdoutRaw: captureResult.stdoutRaw,
@@ -63,6 +70,7 @@ export function createRecord(id, captureResult) {
     normalizedError,
     git: { ...captureResult.git },
     environment: { ...captureResult.environment },
+    regressionOf: options.regressionOf || null,
     recoveries: [],
     verification: null
   });

@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import { StorageEngine } from '../src/storage/store.js';
 import { computeFingerprint } from '../src/storage/fingerprint.js';
 import { isValidRecord } from '../src/storage/record.js';
+import { RecoveryStates } from '../src/storage/state.js';
 
 function createMockCapture(overrides = {}) {
   return {
@@ -69,7 +70,7 @@ describe('Persistent Local Event Storage (src/storage/store.js)', () => {
 
       const saved = store.saveRecord(capture);
       assert.equal(saved.id, '1');
-      assert.equal(saved.status, 'failed');
+      assert.equal(saved.status, RecoveryStates.OBSERVED);
       assert.ok(saved.fingerprint);
 
       // Verify file exists on disk

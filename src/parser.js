@@ -11,8 +11,63 @@ import { InvalidArgumentError } from './errors.js';
  * @property {boolean} flags.json - Whether --json was requested
  * @property {boolean} flags.noColor - Whether --no-color was requested
  * @property {string|null} flags.root - Custom root directory path
+ * @property {string|null} flags.cause - Suspected cause text for recover command
+ * @property {string|null} flags.change - Change made / remediation text for recover command
+ * @property {string|null} flags.verifyCmd - Verification command string for recover command
  * @property {string[]} raw - The original raw argument array
  */
+
+/**
+ * Tokenizes a command line string into an array of arguments,
+ * respecting double quotes, single quotes, and Windows/Unix path separators.
+ *
+ * @param {string} cmdString
+ * @returns {string[]}
+ */
+export function tokenizeCommandLine(cmdString) {
+  if (!cmdString || typeof cmdString !== 'string') return [];
+  const tokens = [];
+  let current = '';
+  let inDouble = false;
+  let inSingle = false;
+
+  for (let i = 0; i < cmdString.length; i++) {
+    const char = cmdString[i];
+    const nextChar = cmdString[i + 1];
+
+    if (char === '\\' && (nextChar === '"' || nextChar === "'" || nextChar === '\\')) {
+      current += nextChar;
+      i++;
+      continue;
+    }
+
+    if (char === '"' && !inSingle) {
+      inDouble = !inDouble;
+      continue;
+    }
+
+    if (char === "'" && !inDouble) {
+      inSingle = !inSingle;
+      continue;
+    }
+
+    if (/\s/.test(char) && !inDouble && !inSingle) {
+      if (current.length > 0) {
+        tokens.push(current);
+        current = '';
+      }
+      continue;
+    }
+
+    current += char;
+  }
+
+  if (current.length > 0) {
+    tokens.push(current);
+  }
+
+  return tokens;
+}
 
 /**
  * Parses raw argv arguments into structured command, positional args, and flags.
@@ -26,7 +81,10 @@ export function parseArgs(rawArgs = []) {
     version: false,
     json: false,
     noColor: false,
-    root: null
+    root: null,
+    cause: null,
+    change: null,
+    verifyCmd: null
   };
 
   const positional = [];
@@ -69,6 +127,36 @@ export function parseArgs(rawArgs = []) {
       }
       flags.root = val;
       i++;
+    } else if (arg === '--cause' || arg === '-c') {
+      i++;
+      if (i >= rawArgs.length || rawArgs[i].startsWith('-')) {
+        throw new InvalidArgumentError('Option "--cause" requires a text value.');
+      }
+      flags.cause = rawArgs[i];
+      i++;
+    } else if (arg.startsWith('--cause=')) {
+      flags.cause = arg.slice('--cause='.length);
+      i++;
+    } else if (arg === '--change' || arg === '--fix' || arg === '-m') {
+      i++;
+      if (i >= rawArgs.length || rawArgs[i].startsWith('-')) {
+        throw new InvalidArgumentError('Option "--change" requires a text value.');
+      }
+      flags.change = rawArgs[i];
+      i++;
+    } else if (arg.startsWith('--change=')) {
+      flags.change = arg.slice('--change='.length);
+      i++;
+    } else if (arg === '--verify-cmd' || arg === '--verify') {
+      i++;
+      if (i >= rawArgs.length || rawArgs[i].startsWith('-')) {
+        throw new InvalidArgumentError('Option "--verify-cmd" requires a command string.');
+      }
+      flags.verifyCmd = rawArgs[i];
+      i++;
+    } else if (arg.startsWith('--verify-cmd=')) {
+      flags.verifyCmd = arg.slice('--verify-cmd='.length);
+      i++;
     } else if (arg.startsWith('-')) {
       throw new InvalidArgumentError(`Unknown option: "${arg}". Run "rewind --help" for usage.`);
     } else {
@@ -81,7 +169,7 @@ export function parseArgs(rawArgs = []) {
     }
   }
 
-  // Support "rewind help [subcommand]" by normalizing to help flag / command
+  // Support "rewind help [subcommand]" by normalizing to help command and target subcommand
   if (command === 'help') {
     flags.help = true;
     if (positional.length > 0) {

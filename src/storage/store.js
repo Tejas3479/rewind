@@ -2,6 +2,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { createRecord, isValidRecord } from './record.js';
+import { RecoveryStates } from './state.js';
+import { computeFingerprint } from './fingerprint.js';
+import { CliError } from '../errors.js';
 
 export class StorageEngine {
   /**
@@ -160,19 +163,69 @@ export class StorageEngine {
   }
 
   /**
+   * Searches for a prior record that reached the VERIFIED state with the same fingerprint.
+   *
+   * @param {string} fingerprint
+   * @returns {import('./record.js').FailureRecord|null}
+   */
+  findVerifiedByFingerprint(fingerprint) {
+    if (!fingerprint) return null;
+    let latestVerified = null;
+
+    for (const record of this.index.values()) {
+      if (record.fingerprint === fingerprint && record.status === RecoveryStates.VERIFIED) {
+        if (!latestVerified || Number(record.id) > Number(latestVerified.id)) {
+          latestVerified = record;
+        }
+      }
+    }
+    return latestVerified;
+  }
+
+  /**
    * Saves a command capture result as an immutable record on disk using
    * crash-safe atomic write (write tmp -> fsync -> rename).
+   * Automatically detects regressions if matching a previously verified failure.
    *
    * @param {import('../capture.js').CaptureRecord} captureResult
+   * @param {object} [options]
    * @returns {import('./record.js').FailureRecord}
    */
-  saveRecord(captureResult) {
+  saveRecord(captureResult, options = {}) {
     if (!this.initialized) {
       this.init();
     }
 
     const id = this.getNextId();
-    const record = createRecord(id, captureResult);
+
+    // Check for regression against previously verified records
+    let initialState = options.initialState;
+    let regressionOf = options.regressionOf || null;
+
+    if (!captureResult.success && !initialState) {
+      const { fingerprint } = computeFingerprint({
+        command: captureResult.command,
+        args: captureResult.args,
+        exitCode: captureResult.exitCode,
+        signal: captureResult.signal,
+        stderr: captureResult.stderr,
+        stdout: captureResult.stdout
+      });
+
+      const priorVerified = this.findVerifiedByFingerprint(fingerprint);
+      if (priorVerified) {
+        initialState = RecoveryStates.REGRESSED;
+        regressionOf = priorVerified.id;
+      } else {
+        initialState = RecoveryStates.OBSERVED;
+      }
+    }
+
+    const record = createRecord(id, captureResult, {
+      initialState,
+      regressionOf
+    });
+
     const jsonContent = JSON.stringify(record, null, 2);
 
     // 1. Write to temporary file with unique UUID in tmp directory
@@ -182,7 +235,6 @@ export class StorageEngine {
     const fd = fs.openSync(tempFilePath, 'w', 0o600);
     try {
       fs.writeSync(fd, jsonContent);
-      // Flush kernel buffer to disk
       fs.fsyncSync(fd);
     } finally {
       fs.closeSync(fd);
@@ -200,6 +252,54 @@ export class StorageEngine {
     }
 
     return record;
+  }
+
+  /**
+   * Atomically updates an existing record on disk and in memory.
+   *
+   * @param {string|number} id
+   * @param {(current: import('./record.js').FailureRecord) => import('./record.js').FailureRecord} updaterFn
+   * @returns {import('./record.js').FailureRecord}
+   */
+  updateRecord(id, updaterFn) {
+    if (!this.initialized) {
+      this.init();
+    }
+
+    const strId = String(id);
+    const existing = this.getRecord(strId);
+    if (!existing) {
+      throw new CliError(`Incident #${strId} not found in ledger.`, { code: 'ERR_NOT_FOUND', exitCode: 1 });
+    }
+
+    const updated = updaterFn(existing);
+    if (!isValidRecord(updated)) {
+      throw new CliError(`Record update failed schema validation for Incident #${strId}.`, { code: 'ERR_VALIDATION' });
+    }
+
+    const frozen = Object.freeze(updated);
+    const jsonContent = JSON.stringify(frozen, null, 2);
+
+    // 1. Atomic write to tmp
+    const tempFilename = `${strId}_update_${Date.now()}_${crypto.randomUUID().slice(0, 8)}.tmp`;
+    const tempFilePath = path.join(this.tmpDir, tempFilename);
+
+    const fd = fs.openSync(tempFilePath, 'w', 0o600);
+    try {
+      fs.writeSync(fd, jsonContent);
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
+
+    // 2. Atomic rename
+    const destinationPath = path.join(this.recordsDir, `${strId}.json`);
+    fs.renameSync(tempFilePath, destinationPath);
+
+    // 3. Update in-memory index
+    this.index.set(strId, frozen);
+
+    return frozen;
   }
 
   /**
