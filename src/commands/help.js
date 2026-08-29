@@ -163,6 +163,24 @@ const COMMAND_DOCS = {
       'rewind rebuild',
       'rewind rebuild --json'
     ]
+  },
+  doctor: {
+    usage: 'rewind doctor [options]',
+    description: 'Run comprehensive self-diagnostics on ledger integrity, storage consistency, configuration, and runtime health.',
+    arguments: [],
+    options: [
+      { flag: '--repair', description: 'Safely clean orphan temporary files and rebuild derived projections' },
+      { flag: '--dry-run', description: 'Preview planned repairs without modifying disk' },
+      { flag: '--json', description: 'Output diagnostic report in machine-readable JSON' },
+      { flag: '--no-color', description: 'Disable ANSI color formatting' },
+      { flag: '--root <path>', description: 'Explicit project root / ledger directory' }
+    ],
+    examples: [
+      'rewind doctor',
+      'rewind doctor --repair',
+      'rewind doctor --repair --dry-run',
+      'rewind doctor --json'
+    ]
   }
 };
 
@@ -189,8 +207,9 @@ export function formatTopLevelHelp(s) {
     `  6. ${s.cyan('rewind search <query...>')}         Search past failures by keyword, error text, or fingerprint`,
     `  7. ${s.cyan('rewind patterns')}                  Analyze failure/recovery patterns and flakiness diagnostics`,
     `  8. ${s.cyan('rewind context [latest|<id>]')}     Output structured diagnostic context for coding agents`,
-    `  9. ${s.cyan('rewind verify-integrity')}          Audit cryptographic hash chain and checkpoint integrity`,
-    `  10. ${s.cyan('rewind rebuild')}                  Reconstruct derived incident views from immutable journal`,
+    `  9. ${s.cyan('rewind doctor')}                    Run installation and ledger self-diagnostics`,
+    `  10. ${s.cyan('rewind verify-integrity')}         Audit cryptographic hash chain and checkpoint integrity`,
+    `  11. ${s.cyan('rewind rebuild')}                 Reconstruct derived incident views from immutable journal`,
     '',
     `${s.bold('GLOBAL OPTIONS:')}`,
     `  ${s.yellow('-h, --help')}                        Show help information`,

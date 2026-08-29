@@ -88,7 +88,9 @@ export function parseArgs(rawArgs = []) {
     change: null,
     verifyCmd: null,
     fingerprint: null,
-    explain: false
+    explain: false,
+    repair: false,
+    dryRun: false
   };
 
   const positional = [];
@@ -192,6 +194,12 @@ export function parseArgs(rawArgs = []) {
       i++;
     } else if (arg === '--explain') {
       flags.explain = true;
+      i++;
+    } else if (arg === '--repair') {
+      flags.repair = true;
+      i++;
+    } else if (arg === '--dry-run') {
+      flags.dryRun = true;
       i++;
     } else if (arg.startsWith('-')) {
       throw new InvalidArgumentError(`Unknown option: "${arg}". Run "rewind --help" for usage.`);

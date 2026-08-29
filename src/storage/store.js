@@ -19,6 +19,7 @@ import { projectEventsToRecords, writeProjectedRecords } from './projection.js';
 import { verifyLedgerIntegrity } from './integrity.js';
 import { analyzePatternsFromJournal } from './patterns.js';
 import { buildAgentContext } from './context.js';
+import { runDoctorDiagnostics, executeDoctorRepair } from './doctor.js';
 import { CliError } from '../errors.js';
 
 /**
@@ -707,5 +708,27 @@ export class StorageEngine {
    */
   getQuarantined() {
     return this.quarantined;
+  }
+
+  /**
+   * Runs the complete self-diagnostics suite across ledger integrity, storage, and runtime.
+   *
+   * @param {object} [config={}]
+   * @param {object} [options={}]
+   * @returns {object}
+   */
+  diagnoseHealth(config = {}, options = {}) {
+    return runDoctorDiagnostics(this.ledgerDir, config, options);
+  }
+
+  /**
+   * Executes a safe non-destructive repair on derived projections and temporary directories.
+   *
+   * @param {object} [config={}]
+   * @param {object} [options={}]
+   * @returns {object}
+   */
+  repairHealth(config = {}, options = {}) {
+    return executeDoctorRepair(this.ledgerDir, config, options);
   }
 }
