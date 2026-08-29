@@ -29,11 +29,11 @@ export class StorageEngine {
    * quarantines any corrupt JSON files, and rebuilds the in-memory index.
    */
   init() {
-    // 1. Ensure directory hierarchy exists
-    fs.mkdirSync(this.ledgerDir, { recursive: true });
-    fs.mkdirSync(this.recordsDir, { recursive: true });
-    fs.mkdirSync(this.tmpDir, { recursive: true });
-    fs.mkdirSync(this.quarantineDir, { recursive: true });
+    // 1. Ensure directory hierarchy exists with secure permissions (0o700)
+    fs.mkdirSync(this.ledgerDir, { recursive: true, mode: 0o700 });
+    fs.mkdirSync(this.recordsDir, { recursive: true, mode: 0o700 });
+    fs.mkdirSync(this.tmpDir, { recursive: true, mode: 0o700 });
+    fs.mkdirSync(this.quarantineDir, { recursive: true, mode: 0o700 });
 
     // 2. Clean orphaned temporary files in tmpDir
     this.cleanOrphanedTempFiles();
@@ -201,7 +201,7 @@ export class StorageEngine {
 
   /**
    * Saves a command capture result as an immutable record on disk using
-   * crash-safe atomic write (write tmp -> fsync -> rename).
+   * crash-safe atomic write (write tmp -> fsync -> rename) with 0o600 permissions.
    * Automatically detects regressions if matching a previously verified failure.
    *
    * @param {import('../capture.js').CaptureRecord} captureResult
@@ -245,7 +245,7 @@ export class StorageEngine {
 
     const jsonContent = JSON.stringify(record, null, 2);
 
-    // 1. Write to temporary file with unique UUID in tmp directory
+    // 1. Write to temporary file with unique UUID in tmp directory with strict permissions
     const tempFilename = `${id}_${Date.now()}_${crypto.randomUUID().slice(0, 8)}.tmp`;
     const tempFilePath = path.join(this.tmpDir, tempFilename);
 
@@ -283,7 +283,11 @@ export class StorageEngine {
       this.init();
     }
 
-    const strId = String(id);
+    const strId = String(id).trim();
+    if (!/^\d+$/.test(strId)) {
+      throw new CliError(`Invalid incident ID format: "${strId}". Incident IDs must be positive integers.`, { code: 'ERR_INVALID_ID', exitCode: 1 });
+    }
+
     const existing = this.getRecord(strId);
     if (!existing) {
       throw new CliError(`Incident #${strId} not found in ledger.`, { code: 'ERR_NOT_FOUND', exitCode: 1 });
@@ -297,7 +301,7 @@ export class StorageEngine {
     const frozen = Object.freeze(updated);
     const jsonContent = JSON.stringify(frozen, null, 2);
 
-    // 1. Atomic write to tmp
+    // 1. Atomic write to tmp with 0o600 permissions
     const tempFilename = `${strId}_update_${Date.now()}_${crypto.randomUUID().slice(0, 8)}.tmp`;
     const tempFilePath = path.join(this.tmpDir, tempFilename);
 
@@ -321,6 +325,7 @@ export class StorageEngine {
 
   /**
    * Retrieves a record by ID from the in-memory index.
+   * Strictly validates numeric ID to prevent path traversal attempts.
    *
    * @param {string|number} id
    * @returns {import('./record.js').FailureRecord|null}
@@ -329,7 +334,11 @@ export class StorageEngine {
     if (!this.initialized) {
       this.init();
     }
-    return this.index.get(String(id)) || null;
+    const strId = String(id).trim();
+    if (!/^\d+$/.test(strId)) {
+      return null;
+    }
+    return this.index.get(strId) || null;
   }
 
   /**

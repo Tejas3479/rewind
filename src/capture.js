@@ -5,6 +5,11 @@ import { sanitizeOutput } from './sanitizer.js';
 import { SpawnError } from './errors.js';
 
 /**
+ * Maximum captured buffer size per stream (10MB) to prevent resource exhaustion.
+ */
+export const MAX_BUFFER_BYTES = 10 * 1024 * 1024;
+
+/**
  * Execution and capture result record.
  * @typedef {object} CaptureRecord
  * @property {string} command - Target executable/command
@@ -27,7 +32,7 @@ import { SpawnError } from './errors.js';
 
 /**
  * Executes a child process, streams its output live, and captures all lifecycle,
- * output, git, and environment diagnostic evidence.
+ * output, git, and environment diagnostic evidence with safety limits.
  *
  * @param {string[]} commandTokens - Command and arguments array (e.g. ['npm', 'test'])
  * @param {object} [options]
@@ -37,6 +42,7 @@ import { SpawnError } from './errors.js';
  * @param {NodeJS.WritableStream|null} [options.stderrStream] - Stream to pipe live stderr to
  * @param {boolean} [options.shell=false] - Whether to spawn inside a shell
  * @param {number} [options.timeout] - Process execution timeout in ms
+ * @param {number} [options.maxBufferBytes=MAX_BUFFER_BYTES] - Maximum buffer bytes per stream
  * @returns {Promise<CaptureRecord>}
  */
 export async function executeAndCapture(commandTokens, options = {}) {
@@ -50,12 +56,17 @@ export async function executeAndCapture(commandTokens, options = {}) {
   const stdoutStream = options.stdoutStream || null;
   const stderrStream = options.stderrStream || null;
   const useShell = options.shell !== undefined ? Boolean(options.shell) : false;
+  const maxBuffer = options.maxBufferBytes || MAX_BUFFER_BYTES;
 
   const startTimeIso = new Date().toISOString();
   const startHrTime = process.hrtime.bigint();
 
   const stdoutChunks = [];
   const stderrChunks = [];
+  let stdoutBytes = 0;
+  let stderrBytes = 0;
+  let stdoutTruncated = false;
+  let stderrTruncated = false;
 
   return new Promise((resolve, reject) => {
     let childProcess;
@@ -73,7 +84,14 @@ export async function executeAndCapture(commandTokens, options = {}) {
 
     if (childProcess.stdout) {
       childProcess.stdout.on('data', (chunk) => {
-        stdoutChunks.push(chunk);
+        if (stdoutBytes < maxBuffer) {
+          stdoutChunks.push(chunk);
+          stdoutBytes += chunk.length;
+        } else if (!stdoutTruncated) {
+          stdoutTruncated = true;
+          stdoutChunks.push(Buffer.from('\n[rewind: output truncated after 10MB limit]\n', 'utf8'));
+        }
+
         if (stdoutStream && typeof stdoutStream.write === 'function') {
           stdoutStream.write(chunk);
         }
@@ -82,7 +100,14 @@ export async function executeAndCapture(commandTokens, options = {}) {
 
     if (childProcess.stderr) {
       childProcess.stderr.on('data', (chunk) => {
-        stderrChunks.push(chunk);
+        if (stderrBytes < maxBuffer) {
+          stderrChunks.push(chunk);
+          stderrBytes += chunk.length;
+        } else if (!stderrTruncated) {
+          stderrTruncated = true;
+          stderrChunks.push(Buffer.from('\n[rewind: output truncated after 10MB limit]\n', 'utf8'));
+        }
+
         if (stderrStream && typeof stderrStream.write === 'function') {
           stderrStream.write(chunk);
         }

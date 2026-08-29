@@ -1,6 +1,7 @@
 import { MissingArgumentError, CliError } from '../errors.js';
 import { formatJson } from '../formatter.js';
 import { RecoveryStates } from '../storage/state.js';
+import { sanitizeForDisplay } from '../sanitizer.js';
 
 /**
  * Returns colored state label.
@@ -28,6 +29,7 @@ function formatStatus(status, s) {
 /**
  * Handler for `rewind show <id> [options]`.
  * Displays complete inspectable record for a given incident ID.
+ * Untrusted evidence is sanitized for display to prevent ANSI injection and secret leakage.
  *
  * @param {object} params
  * @param {import('../cli.js').CliContext} params.context
@@ -77,21 +79,24 @@ export async function showCommand({ context }) {
   stdout.write(`  ${s.dim('Fingerprint:')}   ${s.cyan(record.fingerprint || 'none')}\n`);
   if (record.normalizedError) {
     stdout.write(`  ${s.dim('Normalized Signature:')}\n`);
-    const normLines = record.normalizedError.split('\n').map((l) => `    ${s.yellow(l)}`).join('\n');
+    const cleanNorm = sanitizeForDisplay(record.normalizedError);
+    const normLines = cleanNorm.split('\n').map((l) => `    ${s.yellow(l)}`).join('\n');
     stdout.write(`${normLines}\n`);
   }
   stdout.write('\n');
 
-  // Section 3: Diagnostic Evidence Output
+  // Section 3: Diagnostic Evidence Output (Sanitized for Terminal Safety)
   if (record.stderr) {
     stdout.write(`${s.bold('CAPTURED STDERR:')}\n`);
-    const errLines = record.stderr.split('\n').map((l) => `  ${l}`).join('\n');
+    const cleanStderr = sanitizeForDisplay(record.stderr);
+    const errLines = cleanStderr.split('\n').map((l) => `  ${l}`).join('\n');
     stdout.write(`${errLines}\n\n`);
   }
 
   if (record.stdout && record.stdout.trim()) {
     stdout.write(`${s.bold('CAPTURED STDOUT:')}\n`);
-    const outLines = record.stdout.split('\n').map((l) => `  ${l}`).join('\n');
+    const cleanStdout = sanitizeForDisplay(record.stdout);
+    const outLines = cleanStdout.split('\n').map((l) => `  ${l}`).join('\n');
     stdout.write(`${outLines}\n\n`);
   }
 
@@ -112,9 +117,9 @@ export async function showCommand({ context }) {
     for (let i = 0; i < record.recoveries.length; i++) {
       const rec = record.recoveries[i];
       stdout.write(`  ${s.bold(`[Attempt #${i + 1}]`)} ${s.dim(`(${rec.timestamp})`)}\n`);
-      if (rec.cause) stdout.write(`    ${s.dim('Cause:')}   ${rec.cause}\n`);
-      if (rec.change) stdout.write(`    ${s.dim('Change:')}  ${rec.change}\n`);
-      if (rec.verifyCmd) stdout.write(`    ${s.dim('Verify:')}  ${s.cyan(rec.verifyCmd)}\n`);
+      if (rec.cause) stdout.write(`    ${s.dim('Cause:')}   ${sanitizeForDisplay(rec.cause)}\n`);
+      if (rec.change) stdout.write(`    ${s.dim('Change:')}  ${sanitizeForDisplay(rec.change)}\n`);
+      if (rec.verifyCmd) stdout.write(`    ${s.dim('Verify:')}  ${s.cyan(sanitizeForDisplay(rec.verifyCmd))}\n`);
     }
     stdout.write('\n');
   }
@@ -123,7 +128,7 @@ export async function showCommand({ context }) {
   if (record.verification) {
     stdout.write(`${s.bold('VERIFICATION RECORD:')}\n`);
     stdout.write(`  ${s.dim('Status:')}       ${record.status === RecoveryStates.VERIFIED ? s.green(s.bold('VERIFIED')) : s.red(s.bold('FAILED'))}\n`);
-    stdout.write(`  ${s.dim('Command:')}      ${s.cyan(record.verification.command)}\n`);
+    stdout.write(`  ${s.dim('Command:')}      ${s.cyan(sanitizeForDisplay(record.verification.command))}\n`);
     stdout.write(`  ${s.dim('Exit Code:')}    ${record.verification.exitCode}\n`);
     if (record.verification.verifiedAt) {
       stdout.write(`  ${s.dim('Verified At:')}  ${record.verification.verifiedAt}\n`);
