@@ -228,8 +228,8 @@ describe('Persistent Local Event Storage (src/storage/store.js)', () => {
       stderr: 'Error: Cannot find module "foo"'
     });
 
-    assert.equal(f1, f2);
-    assert.equal(f1.length, 16);
+    assert.equal(f1.fingerprint, f2.fingerprint);
+    assert.equal(f1.fingerprint.length, 16);
 
     const f3 = computeFingerprint({
       command: 'pytest',
@@ -238,6 +238,6 @@ describe('Persistent Local Event Storage (src/storage/store.js)', () => {
       stderr: 'Failing test in test_auth.py'
     });
 
-    assert.notEqual(f1, f3);
+    assert.notEqual(f1.fingerprint, f3.fingerprint);
   });
 });

@@ -10,6 +10,7 @@ export { stripAnsi, sanitizeOutput } from './sanitizer.js';
 export { StorageEngine } from './storage/store.js';
 export { createRecord, isValidRecord } from './storage/record.js';
 export { computeFingerprint } from './storage/fingerprint.js';
+export { normalizeErrorText } from './storage/normalizer.js';
 export {
   ExitCodes,
   CliError,

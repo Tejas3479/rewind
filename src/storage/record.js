@@ -4,7 +4,7 @@ import { computeFingerprint } from './fingerprint.js';
  * Storage record data contract.
  * @typedef {object} FailureRecord
  * @property {string} id - Monotonically increasing unique record ID (e.g. "1")
- * @property {string} fingerprint - Deterministic failure hash
+ * @property {string} fingerprint - Deterministic failure hash (16 hex chars)
  * @property {string} command - Target command executable
  * @property {string[]} args - Target command arguments
  * @property {string} fullCommand - Full command string
@@ -19,6 +19,7 @@ import { computeFingerprint } from './fingerprint.js';
  * @property {string} stderr - Sanitized stderr
  * @property {string} stdoutRaw - Raw stdout bytes decoded as UTF-8
  * @property {string} stderrRaw - Raw stderr bytes decoded as UTF-8
+ * @property {string} normalizedError - Canonically normalized error text for fingerprinting
  * @property {import('../git.js').GitMetadata} git - Repository metadata
  * @property {object} environment - Safe environment metadata
  * @property {Array<object>} recoveries - Attempted recovery actions
@@ -33,10 +34,11 @@ import { computeFingerprint } from './fingerprint.js';
  * @returns {FailureRecord}
  */
 export function createRecord(id, captureResult) {
-  const fingerprint = computeFingerprint({
+  const { fingerprint, normalizedError } = computeFingerprint({
     command: captureResult.command,
     args: captureResult.args,
     exitCode: captureResult.exitCode,
+    signal: captureResult.signal,
     stderr: captureResult.stderr,
     stdout: captureResult.stdout
   });
@@ -58,6 +60,7 @@ export function createRecord(id, captureResult) {
     stderr: captureResult.stderr,
     stdoutRaw: captureResult.stdoutRaw,
     stderrRaw: captureResult.stderrRaw,
+    normalizedError,
     git: { ...captureResult.git },
     environment: { ...captureResult.environment },
     recoveries: [],
