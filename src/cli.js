@@ -2,6 +2,7 @@ import { parseArgs } from './parser.js';
 import { resolveConfig } from './config.js';
 import { createStyler, shouldEnableColor, formatError, formatJson } from './formatter.js';
 import { dispatch } from './router.js';
+import { StorageEngine } from './storage/store.js';
 import { CliError, ExitCodes } from './errors.js';
 
 /**
@@ -9,6 +10,7 @@ import { CliError, ExitCodes } from './errors.js';
  * @property {string[]} argv
  * @property {import('./parser.js').ParsedArgs} parsedArgs
  * @property {ReturnType<import('./config.js').resolveConfig>} config
+ * @property {StorageEngine} storage
  * @property {ReturnType<import('./formatter.js').createStyler>} styler
  * @property {NodeJS.WritableStream} stdout
  * @property {NodeJS.WritableStream} stderr
@@ -63,12 +65,17 @@ export async function runCLI(
       cwd
     });
 
-    // 4. Build Context
+    // 4. Initialize Local Storage Engine
+    const storage = new StorageEngine(config.ledgerDir);
+    storage.init();
+
+    // 5. Build Context
     /** @type {CliContext} */
     const context = {
       argv,
       parsedArgs,
       config,
+      storage,
       styler,
       stdout,
       stderr,
@@ -77,7 +84,7 @@ export async function runCLI(
       cwd
     };
 
-    // 5. Dispatch command
+    // 6. Dispatch command
     const exitCode = await dispatch({ context });
     return typeof exitCode === 'number' ? exitCode : ExitCodes.SUCCESS;
   } catch (err) {

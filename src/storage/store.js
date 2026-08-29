@@ -1,0 +1,245 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import { createRecord, isValidRecord } from './record.js';
+
+export class StorageEngine {
+  /**
+   * @param {string} ledgerDir - Path to .rewind directory
+   */
+  constructor(ledgerDir) {
+    this.ledgerDir = path.resolve(ledgerDir);
+    this.recordsDir = path.join(this.ledgerDir, 'records');
+    this.tmpDir = path.join(this.ledgerDir, 'tmp');
+    this.quarantineDir = path.join(this.ledgerDir, 'quarantine');
+
+    /** @type {Map<string, import('./record.js').FailureRecord>} */
+    this.index = new Map();
+    this.highestId = 0;
+    /** @type {Array<{ file: string, reason: string, quarantinedAt: string }>} */
+    this.quarantined = [];
+    this.initialized = false;
+  }
+
+  /**
+   * Initializes the storage directory layout, cleans orphan temp files,
+   * quarantines any corrupt JSON files, and rebuilds the in-memory index.
+   */
+  init() {
+    // 1. Ensure directory hierarchy exists
+    fs.mkdirSync(this.ledgerDir, { recursive: true });
+    fs.mkdirSync(this.recordsDir, { recursive: true });
+    fs.mkdirSync(this.tmpDir, { recursive: true });
+    fs.mkdirSync(this.quarantineDir, { recursive: true });
+
+    // 2. Clean orphaned temporary files in tmpDir
+    this.cleanOrphanedTempFiles();
+
+    // 3. Scan and load records, quarantining corrupt files
+    this.rebuildIndex();
+
+    this.initialized = true;
+    return this;
+  }
+
+  /**
+   * Safely deletes orphaned .tmp files left over from crashes or aborted writes.
+   */
+  cleanOrphanedTempFiles() {
+    try {
+      const files = fs.readdirSync(this.tmpDir);
+      for (const file of files) {
+        if (file.endsWith('.tmp')) {
+          try {
+            fs.unlinkSync(path.join(this.tmpDir, file));
+          } catch {
+            // Ignore failure to delete individual temp file
+          }
+        }
+      }
+    } catch {
+      // Directory read failed
+    }
+  }
+
+  /**
+   * Scans records directory, quarantines any corrupt or malformed files,
+   * and rebuilds the in-memory lookup index.
+   */
+  rebuildIndex() {
+    this.index.clear();
+    this.highestId = 0;
+    this.quarantined = [];
+
+    let filenames = [];
+    try {
+      filenames = fs.readdirSync(this.recordsDir);
+    } catch {
+      return;
+    }
+
+    for (const filename of filenames) {
+      const filePath = path.join(this.recordsDir, filename);
+
+      // Handle stray temp files in records dir
+      if (filename.endsWith('.tmp')) {
+        try {
+          fs.unlinkSync(filePath);
+        } catch {
+          // Ignore
+        }
+        continue;
+      }
+
+      if (!filename.endsWith('.json')) {
+        continue;
+      }
+
+      let content;
+      try {
+        content = fs.readFileSync(filePath, 'utf8');
+      } catch (readErr) {
+        this.quarantineFile(filePath, filename, `Unreadable file: ${readErr.message}`);
+        continue;
+      }
+
+      let parsed;
+      try {
+        parsed = JSON.parse(content);
+      } catch (parseErr) {
+        this.quarantineFile(filePath, filename, `Malformed JSON: ${parseErr.message}`);
+        continue;
+      }
+
+      if (!isValidRecord(parsed)) {
+        this.quarantineFile(filePath, filename, 'Schema validation failed: missing required fields');
+        continue;
+      }
+
+      // Valid record: store in in-memory index
+      this.index.set(parsed.id, Object.freeze(parsed));
+
+      const numId = Number.parseInt(parsed.id, 10);
+      if (!Number.isNaN(numId) && numId > this.highestId) {
+        this.highestId = numId;
+      }
+    }
+  }
+
+  /**
+   * Quarantines a corrupted file by moving it out of records/ into quarantine/
+   *
+   * @param {string} filePath
+   * @param {string} filename
+   * @param {string} reason
+   */
+  quarantineFile(filePath, filename, reason) {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const quarantineName = `${timestamp}_${filename}`;
+    const targetPath = path.join(this.quarantineDir, quarantineName);
+
+    try {
+      fs.renameSync(filePath, targetPath);
+      this.quarantined.push({
+        file: quarantineName,
+        reason,
+        quarantinedAt: new Date().toISOString()
+      });
+    } catch {
+      // If rename fails, try delete to prevent infinite crash loops
+    }
+  }
+
+  /**
+   * Calculates the next unique sequential record ID.
+   *
+   * @returns {string}
+   */
+  getNextId() {
+    return String(this.highestId + 1);
+  }
+
+  /**
+   * Saves a command capture result as an immutable record on disk using
+   * crash-safe atomic write (write tmp -> fsync -> rename).
+   *
+   * @param {import('../capture.js').CaptureRecord} captureResult
+   * @returns {import('./record.js').FailureRecord}
+   */
+  saveRecord(captureResult) {
+    if (!this.initialized) {
+      this.init();
+    }
+
+    const id = this.getNextId();
+    const record = createRecord(id, captureResult);
+    const jsonContent = JSON.stringify(record, null, 2);
+
+    // 1. Write to temporary file with unique UUID in tmp directory
+    const tempFilename = `${id}_${Date.now()}_${crypto.randomUUID().slice(0, 8)}.tmp`;
+    const tempFilePath = path.join(this.tmpDir, tempFilename);
+
+    const fd = fs.openSync(tempFilePath, 'w', 0o600);
+    try {
+      fs.writeSync(fd, jsonContent);
+      // Flush kernel buffer to disk
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
+
+    // 2. Atomically rename temporary file to destination record path
+    const destinationPath = path.join(this.recordsDir, `${id}.json`);
+    fs.renameSync(tempFilePath, destinationPath);
+
+    // 3. Update in-memory index
+    this.index.set(id, record);
+    const numId = Number.parseInt(id, 10);
+    if (!Number.isNaN(numId) && numId > this.highestId) {
+      this.highestId = numId;
+    }
+
+    return record;
+  }
+
+  /**
+   * Retrieves a record by ID from the in-memory index.
+   *
+   * @param {string|number} id
+   * @returns {import('./record.js').FailureRecord|null}
+   */
+  getRecord(id) {
+    if (!this.initialized) {
+      this.init();
+    }
+    return this.index.get(String(id)) || null;
+  }
+
+  /**
+   * Returns all stored records sorted by numeric ID / creation order.
+   *
+   * @returns {Array<import('./record.js').FailureRecord>}
+   */
+  listRecords() {
+    if (!this.initialized) {
+      this.init();
+    }
+    return Array.from(this.index.values()).sort((a, b) => {
+      const idA = Number.parseInt(a.id, 10);
+      const idB = Number.parseInt(b.id, 10);
+      if (!Number.isNaN(idA) && !Number.isNaN(idB)) {
+        return idA - idB;
+      }
+      return a.id.localeCompare(b.id);
+    });
+  }
+
+  /**
+   * Returns list of any files quarantined during startup.
+   *
+   * @returns {Array<{ file: string, reason: string, quarantinedAt: string }>}
+   */
+  getQuarantined() {
+    return [...this.quarantined];
+  }
+}

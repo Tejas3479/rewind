@@ -7,6 +7,9 @@ export { executeAndCapture } from './capture.js';
 export { readGitMetadata, findGitDir } from './git.js';
 export { captureSafeEnvironment, SAFE_VALUE_ALLOWLIST } from './environment.js';
 export { stripAnsi, sanitizeOutput } from './sanitizer.js';
+export { StorageEngine } from './storage/store.js';
+export { createRecord, isValidRecord } from './storage/record.js';
+export { computeFingerprint } from './storage/fingerprint.js';
 export {
   ExitCodes,
   CliError,
