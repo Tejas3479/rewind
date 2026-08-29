@@ -24,12 +24,14 @@ const COMMAND_DOCS = {
     description: 'List failure records and recovery timeline from the local ledger.',
     arguments: [],
     options: [
+      { flag: '--limit <N>', description: 'Limit number of entries displayed' },
       { flag: '--json', description: 'Output history in JSON format' },
       { flag: '--no-color', description: 'Disable ANSI color formatting' },
       { flag: '--root <path>', description: 'Explicit project root / ledger directory' }
     ],
     examples: [
       'rewind history',
+      'rewind history --limit 5',
       'rewind history --json'
     ]
   },
@@ -50,17 +52,20 @@ const COMMAND_DOCS = {
     ]
   },
   recover: {
-    usage: 'rewind recover <id>',
+    usage: 'rewind recover <id> [options]',
     description: 'Guide recovery for a failed incident and record attempted remediation steps.',
     arguments: [
       { name: '<id>', description: 'Incident ID to recover' }
     ],
     options: [
+      { flag: '--cause <text>', description: 'Suspected root cause' },
+      { flag: '--change <text>', description: 'Remediation action taken' },
+      { flag: '--verify-cmd <cmd>', description: 'Explicit verification command' },
       { flag: '--no-color', description: 'Disable ANSI color formatting' },
       { flag: '--root <path>', description: 'Explicit project root / ledger directory' }
     ],
     examples: [
-      'rewind recover 1'
+      'rewind recover 1 --cause "Bad config" --change "Updated port" --verify-cmd "npm test"'
     ]
   },
   verify: {
@@ -75,6 +80,24 @@ const COMMAND_DOCS = {
     ],
     examples: [
       'rewind verify 1'
+    ]
+  },
+  search: {
+    usage: 'rewind search <query...> [options]',
+    description: 'Search historical failures by error message, keywords, or fingerprint using conservative similarity scoring.',
+    arguments: [
+      { name: '<query...>', description: 'Search terms or error message snippet' }
+    ],
+    options: [
+      { flag: '--limit <N>', description: 'Limit number of candidate matches' },
+      { flag: '--json', description: 'Output search results as JSON' },
+      { flag: '--no-color', description: 'Disable ANSI color formatting' },
+      { flag: '--root <path>', description: 'Explicit project root / ledger directory' }
+    ],
+    examples: [
+      'rewind search "database connection pool"',
+      'rewind search "ECONNREFUSED"',
+      'rewind search 83282360259b'
     ]
   }
 };
@@ -99,6 +122,7 @@ export function formatTopLevelHelp(s) {
     `  ${s.green('show')} ${s.dim('<id>')}           Inspect failure details, logs, and recovery state`,
     `  ${s.green('recover')} ${s.dim('<id>')}        Attempt remediation and capture recovery action`,
     `  ${s.green('verify')} ${s.dim('<id>')}         Run verification command and seal verified fix`,
+    `  ${s.green('search')} ${s.dim('<query...>')}   Search historical failures by error or fingerprint`,
     '',
     `${s.bold('GLOBAL OPTIONS:')}`,
     `  ${s.yellow('-h, --help')}          Show help information`,

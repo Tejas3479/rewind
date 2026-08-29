@@ -6,6 +6,7 @@ import { historyCommand } from './commands/history.js';
 import { showCommand } from './commands/show.js';
 import { recoverCommand } from './commands/recover.js';
 import { verifyCommand } from './commands/verify.js';
+import { searchCommand } from './commands/search.js';
 
 export const COMMANDS = Object.freeze({
   run: runCommand,
@@ -13,6 +14,7 @@ export const COMMANDS = Object.freeze({
   show: showCommand,
   recover: recoverCommand,
   verify: verifyCommand,
+  search: searchCommand,
   help: helpCommand,
   version: versionCommand
 });

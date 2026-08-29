@@ -1,5 +1,5 @@
 export { runCLI } from './cli.js';
-export { parseArgs } from './parser.js';
+export { parseArgs, tokenizeCommandLine } from './parser.js';
 export { dispatch, COMMANDS } from './router.js';
 export { resolveConfig, findProjectRoot, VERSION, DEFAULT_LEDGER_DIR } from './config.js';
 export { createStyler, shouldEnableColor, formatError, formatJson } from './formatter.js';
@@ -12,6 +12,7 @@ export { createRecord, isValidRecord } from './storage/record.js';
 export { computeFingerprint } from './storage/fingerprint.js';
 export { normalizeErrorText } from './storage/normalizer.js';
 export { RecoveryStates, isValidTransition, assertValidTransition } from './storage/state.js';
+export { searchRecords, scoreRecord, extractTokens } from './storage/search.js';
 export {
   ExitCodes,
   CliError,
