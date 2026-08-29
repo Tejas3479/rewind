@@ -17,6 +17,7 @@ import {
 } from './journal.js';
 import { projectEventsToRecords, writeProjectedRecords } from './projection.js';
 import { verifyLedgerIntegrity } from './integrity.js';
+import { analyzePatternsFromJournal } from './patterns.js';
 import { CliError } from '../errors.js';
 
 /**
@@ -667,6 +668,21 @@ export class StorageEngine {
       this.init();
     }
     return Array.from(this.index.values()).sort((a, b) => Number(a.id) - Number(b.id));
+  }
+
+  /**
+   * Generates a deterministic pattern intelligence report from the authoritative journal.
+   *
+   * @param {object} [options={}]
+   * @param {string} [options.fingerprint]
+   * @param {number} [options.limit]
+   * @returns {object}
+   */
+  getPatternReport(options = {}) {
+    if (!this.initialized) {
+      this.init();
+    }
+    return analyzePatternsFromJournal(this.ledgerDir, options);
   }
 
   /**

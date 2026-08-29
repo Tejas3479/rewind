@@ -32,16 +32,16 @@ node bin/rewind.js verify 1
 # 6. Re-run the failing command -> Rewind instantly detects regression & surfaces verified remedy!
 node bin/rewind.js run node -e "console.error('FATAL: Database connection pool exhausted on port 5432'); process.exit(1);"
 
-# 7. Search past remedies by keyword query
-node bin/rewind.js search "connection pool exhausted"
+# 8. Analyze failure & recovery patterns across the repository
+node bin/rewind.js patterns --explain
 
-# 8. Run the complete automated test suite (161 tests, 0 dependencies)
+# 9. Run the complete automated test suite (175 tests, 0 dependencies)
 npm test
 
-# 9. Audit cryptographic integrity of the local ledger
+# 10. Audit cryptographic integrity of the local ledger
 node bin/rewind.js verify-integrity
 
-# 10. Rebuild derived incident projections from immutable journal
+# 11. Rebuild derived incident projections from immutable journal
 node bin/rewind.js rebuild
 ```
 
@@ -151,6 +151,9 @@ To guarantee byte-level reproducibility:
 | `rewind recover <id> [options]` | Record suspected cause, remediation change, and explicit verification command |
 | `rewind verify <id>` | Execute the user-approved verification command to validate and seal the fix |
 | `rewind search <query...> [options]` | Deterministically search historical failures by error message, keywords, or fingerprint |
+| `rewind patterns [options]` | Analyze historical failures into deterministic, evidence-backed pattern diagnostics |
+| `rewind verify-integrity [options]` | Perform read-only 4-layer cryptographic audit across hash chain and checkpoints |
+| `rewind rebuild [options]` | Reconstruct derived incident projection records from the authoritative journal |
 
 ### Global Options
 - `-h, --help`: Show top-level or command-specific help
@@ -158,7 +161,69 @@ To guarantee byte-level reproducibility:
 - `--json`: Output machine-readable JSON on stdout
 - `--no-color`: Disable ANSI styling (also respects standard [`NO_COLOR`](https://no-color.org))
 - `--root <path>`: Specify custom project root or `.rewind` directory location
-- `--limit <N>` / `-n <N>`: Limit number of results in `history` and `search`
+- `--limit <N>` / `-n <N>`: Limit number of results in `history`, `search`, and `patterns`
+- `--fingerprint <hash>` / `-f <hash>`: Filter `patterns` report to a specific failure family
+- `--explain`: Display rules, required criteria, and evidence reasoning in `patterns`
+
+---
+
+## 5. Pattern Intelligence Layer (`rewind patterns`)
+
+Rewind transforms raw failure logs and verified recoveries into **deterministic, non-causal pattern diagnostics**:
+
+```text
+┌───────────────────────────┐
+│     AUTHORITATIVE JOURNAL │
+│       .rewind/journal.jsonl│
+└─────────────┬─────────────┘
+              │ Event Replay
+              ▼
+┌───────────────────────────┐
+│   CANONICAL PROJECTIONS   │
+└─────────────┬─────────────┘
+              │ Evidence Analyzer
+              ▼
+┌───────────────────────────┐
+│    EVIDENTIARY RULES      │
+│  - Recurring Failures     │
+│  - Recurring Regressions  │
+│  - Likely Flaky (>=3 runs)│
+│  - Environment Correlation│
+│  - Runtime Correlation    │
+│  - Command Correlation    │
+│  - Repeated Failed Fixes  │
+│  - Frequently Verified    │
+└─────────────┬─────────────┘
+              │ Honest Attribution (Causality: NOT PROVEN)
+              ▼
+┌───────────────────────────┐
+│  REASONING & EXPLANATIONS │
+│       (--explain)         │
+└───────────────────────────┘
+```
+
+### Pattern Taxonomy & Strict Evidentiary Standards
+
+1. **`RECURRING_FAILURE`**:
+   - Criteria: $\ge 2$ independent incidents with identical failure fingerprint.
+   - Evidence: Total occurrences, first seen, last seen, incident IDs.
+2. **`RECURRING_REGRESSION`**:
+   - Criteria: Verified parent incident followed by subsequent `regression.detected` event.
+   - Evidence: Links to verified parent incidents, elapsed recurrence intervals.
+3. **`LIKELY_FLAKY`**:
+   - Criteria: $\ge 3$ runs with identical commit + normalized command identity + identical environment with mixed pass (exit 0) and failure outcomes.
+   - Evidence: Pass/fail counts, pass rate %, commit hash.
+4. **`ENVIRONMENT_CORRELATED`**:
+   - Criteria: Requires **comparative multi-platform exposure** ($\ge 3$ observations, $\ge 75\%$ platform skew).
+   - Non-causal: Flags `KNOWN_DIFFERENCE` with `Causality: NOT PROVEN`.
+5. **`RUNTIME_CORRELATED`**:
+   - Criteria: Requires **comparative multi-runtime exposure** ($\ge 3$ observations across $\ge 2$ Node major versions, $\ge 75\%$ skew).
+6. **`COMMAND_CORRELATED`**:
+   - Criteria: 100% of failure family occurrences originate from a single distinct command.
+7. **`REPEATED_FAILED_RECOVERY`**:
+   - Criteria: Normalized remediation hypothesis failed verification $\ge 2$ times (Negative Memory).
+8. **`FREQUENTLY_VERIFIED_RECOVERY`**:
+   - Criteria: Normalized remediation verified $\ge 2$ times across the failure family, reporting historical verification rate.
 
 ---
 
@@ -306,7 +371,7 @@ See [`SECURITY.md`](./SECURITY.md) for full threat model and mitigations.
 ## 9. Tested Platforms & Limitations
 
 ### Platform Testing Matrix
-- **Windows 11 (x64):** **VERIFIED** (Full test suite of 161 tests across 39 suites passing; live CLI execution verified).
+- **Windows 11 (x64):** **VERIFIED** (Full test suite of 175 tests across 44 suites passing; live CLI execution verified).
 - **Linux / POSIX:** **VERIFIED** (Standard Node.js built-ins and POSIX path semantics).
 - **macOS (Darwin):** **VERIFIED** (Standard Darwin pathing and file permission models).
 
@@ -329,7 +394,8 @@ The entire Rewind CLI was designed, architected, implemented, hardened, and veri
 - Regression detection and linking engine.
 - History timeline, detailed show inspector, and near-match search engine.
 - Immutable event journal, 4-layer cryptographic integrity layer, and projection rebuild engine.
-- 39 test suites covering 161 automated test cases.
+- Deterministic pattern intelligence engine with `--explain` evidentiary reasoning.
+- 44 test suites covering 175 automated test cases.
 
 ### AI Tools Usage Disclosure
 Antigravity (Google DeepMind) was used as an AI pair programmer for code generation, test authoring, architectural review, and documentation drafting under developer direction. All generated code and tests were audited and verified against the event's zero-dependency rules.

@@ -86,7 +86,9 @@ export function parseArgs(rawArgs = []) {
     limit: null,
     cause: null,
     change: null,
-    verifyCmd: null
+    verifyCmd: null,
+    fingerprint: null,
+    explain: false
   };
 
   const positional = [];
@@ -177,6 +179,19 @@ export function parseArgs(rawArgs = []) {
       i++;
     } else if (arg.startsWith('--verify-cmd=')) {
       flags.verifyCmd = arg.slice('--verify-cmd='.length);
+      i++;
+    } else if (arg === '--fingerprint' || arg === '-f') {
+      i++;
+      if (i >= rawArgs.length || rawArgs[i].startsWith('-')) {
+        throw new InvalidArgumentError('Option "--fingerprint" requires a fingerprint hash string.');
+      }
+      flags.fingerprint = rawArgs[i];
+      i++;
+    } else if (arg.startsWith('--fingerprint=')) {
+      flags.fingerprint = arg.slice('--fingerprint='.length);
+      i++;
+    } else if (arg === '--explain') {
+      flags.explain = true;
       i++;
     } else if (arg.startsWith('-')) {
       throw new InvalidArgumentError(`Unknown option: "${arg}". Run "rewind --help" for usage.`);

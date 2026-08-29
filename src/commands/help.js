@@ -100,6 +100,25 @@ const COMMAND_DOCS = {
       'rewind search 83282360259b'
     ]
   },
+  patterns: {
+    usage: 'rewind patterns [options]',
+    description: 'Analyze historical failure and recovery patterns into deterministic, evidence-backed diagnostics.',
+    arguments: [],
+    options: [
+      { flag: '--fingerprint <hash>, -f <hash>', description: 'Filter pattern diagnostics to a specific fingerprint family' },
+      { flag: '--explain', description: 'Display underlying rules, criteria, and evidence reasoning for each classification' },
+      { flag: '--limit <N>, -n <N>', description: 'Limit number of pattern families displayed' },
+      { flag: '--json', description: 'Output pattern report in machine-readable JSON' },
+      { flag: '--no-color', description: 'Disable ANSI color formatting' },
+      { flag: '--root <path>', description: 'Explicit project root / ledger directory' }
+    ],
+    examples: [
+      'rewind patterns',
+      'rewind patterns --fingerprint A91BF2',
+      'rewind patterns --explain',
+      'rewind patterns --json'
+    ]
+  },
   'verify-integrity': {
     usage: 'rewind verify-integrity [options]',
     description: 'Perform a strictly read-only 4-layer cryptographic audit across the journal, hash chain, checkpoint, and derived views.',
@@ -151,8 +170,9 @@ export function formatTopLevelHelp(s) {
     `  4. ${s.cyan('rewind recover <id>')}              Record suspected cause, fix, and explicit verification command`,
     `  5. ${s.cyan('rewind verify <id>')}               Run user-approved verification command to validate and seal fix`,
     `  6. ${s.cyan('rewind search <query...>')}         Search past failures by keyword, error text, or fingerprint`,
-    `  7. ${s.cyan('rewind verify-integrity')}          Audit cryptographic hash chain and checkpoint integrity`,
-    `  8. ${s.cyan('rewind rebuild')}                   Reconstruct derived incident views from immutable journal`,
+    `  7. ${s.cyan('rewind patterns')}                  Analyze failure/recovery patterns and flakiness diagnostics`,
+    `  8. ${s.cyan('rewind verify-integrity')}          Audit cryptographic hash chain and checkpoint integrity`,
+    `  9. ${s.cyan('rewind rebuild')}                   Reconstruct derived incident views from immutable journal`,
     '',
     `${s.bold('GLOBAL OPTIONS:')}`,
     `  ${s.yellow('-h, --help')}                        Show help information`,
