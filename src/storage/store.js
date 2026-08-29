@@ -1,12 +1,22 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { createRecord, isValidRecord, normalizeRecordToCurrentSchema } from './record.js';
+import { createRecord, isValidRecord, normalizeRecordToCurrentSchema, boundOutput } from './record.js';
 import { IncidentStatus, RecoveryAttemptStatus } from './state.js';
 import { computeFingerprint } from './fingerprint.js';
 import { evaluateStaleness } from './staleness.js';
 import { extractNegativeMemory } from './negative_memory.js';
 import { analyzeEvidenceConflicts } from './contradiction.js';
+import {
+  GENESIS_HASH,
+  appendJournalEvent,
+  readJournalEvents,
+  readCheckpoint,
+  writeCheckpoint,
+  saveEvidenceArtifact
+} from './journal.js';
+import { projectEventsToRecords, writeProjectedRecords } from './projection.js';
+import { verifyLedgerIntegrity } from './integrity.js';
 import { CliError } from '../errors.js';
 
 /**
@@ -27,8 +37,10 @@ export class StorageEngine {
   constructor(ledgerDir) {
     this.ledgerDir = path.resolve(ledgerDir);
     this.recordsDir = path.join(this.ledgerDir, 'records');
+    this.evidenceDir = path.join(this.ledgerDir, 'evidence');
     this.tmpDir = path.join(this.ledgerDir, 'tmp');
     this.quarantineDir = path.join(this.ledgerDir, 'quarantine');
+    this.journalPath = path.join(this.ledgerDir, 'journal.jsonl');
 
     /** @type {Map<string, import('./record.js').IncidentRecord>} */
     this.index = new Map();
@@ -40,19 +52,20 @@ export class StorageEngine {
 
   /**
    * Initializes the storage directory layout, cleans orphan temp files,
-   * quarantines any corrupt JSON files, and rebuilds the in-memory index.
+   * replays the authoritative journal, and syncs derived projections.
    */
   init() {
     // 1. Ensure directory hierarchy exists with secure permissions (0o700)
     fs.mkdirSync(this.ledgerDir, { recursive: true, mode: 0o700 });
     fs.mkdirSync(this.recordsDir, { recursive: true, mode: 0o700 });
+    fs.mkdirSync(this.evidenceDir, { recursive: true, mode: 0o700 });
     fs.mkdirSync(this.tmpDir, { recursive: true, mode: 0o700 });
     fs.mkdirSync(this.quarantineDir, { recursive: true, mode: 0o700 });
 
     // 2. Clean orphaned temporary files in tmpDir
     this.cleanOrphanedTempFiles();
 
-    // 3. Scan and load records, quarantining corrupt files
+    // 3. Scan and replay authoritative journal, rebuilding projections
     this.rebuildIndex();
 
     this.initialized = true;
@@ -64,13 +77,15 @@ export class StorageEngine {
    */
   cleanOrphanedTempFiles() {
     try {
-      const files = fs.readdirSync(this.tmpDir);
-      for (const file of files) {
-        if (file.endsWith('.tmp')) {
-          try {
-            fs.unlinkSync(path.join(this.tmpDir, file));
-          } catch {
-            // Ignore failure to delete individual temp file
+      if (fs.existsSync(this.tmpDir)) {
+        const files = fs.readdirSync(this.tmpDir);
+        for (const file of files) {
+          if (file.endsWith('.tmp')) {
+            try {
+              fs.unlinkSync(path.join(this.tmpDir, file));
+            } catch {
+              // Ignore failure to delete individual temp file
+            }
           }
         }
       }
@@ -79,69 +94,219 @@ export class StorageEngine {
     }
   }
 
-  /**
-   * Scans records directory, quarantines any corrupt or malformed files,
-   * normalizes schemas to the current architecture, and rebuilds the in-memory index.
-   */
   rebuildIndex() {
     this.index.clear();
     this.highestId = 0;
     this.quarantined = [];
 
-    let filenames = [];
-    try {
-      filenames = fs.readdirSync(this.recordsDir);
-    } catch {
-      return;
+    // First, scan recordsDir for any corrupted or unparseable files that need quarantine
+    const quarantinedIds = new Set();
+    if (fs.existsSync(this.recordsDir)) {
+      let recordFiles = [];
+      try {
+        recordFiles = fs.readdirSync(this.recordsDir);
+      } catch {
+        // Ignore
+      }
+
+      for (const file of recordFiles) {
+        if (!file.endsWith('.json')) continue;
+        const filePath = path.join(this.recordsDir, file);
+        try {
+          const content = fs.readFileSync(filePath, 'utf8');
+          const parsed = JSON.parse(content);
+          if (!isValidRecord(parsed)) {
+            this.quarantineFile(filePath, file, 'Schema validation failed: missing required fields');
+            quarantinedIds.add(file.replace(/\.json$/, ''));
+          }
+        } catch (parseErr) {
+          this.quarantineFile(filePath, file, `Malformed JSON: ${parseErr.message}`);
+          quarantinedIds.add(file.replace(/\.json$/, ''));
+        }
+      }
     }
 
-    for (const filename of filenames) {
-      const filePath = path.join(this.recordsDir, filename);
+    // Read events from the authoritative journal
+    const { events, malformed } = readJournalEvents(this.journalPath);
 
-      // Handle stray temp files in records dir
-      if (filename.endsWith('.tmp')) {
-        try {
-          fs.unlinkSync(filePath);
-        } catch {
-          // Ignore
+    if (events.length > 0) {
+      // 1. Crash Consistency check: if checkpoint lagged behind valid journal head, fast-forward it
+      const checkpoint = readCheckpoint(this.ledgerDir);
+      const lastEvent = events[events.length - 1];
+
+      if (!checkpoint || checkpoint.headSequence < lastEvent.sequence) {
+        writeCheckpoint(this.ledgerDir, {
+          headSequence: lastEvent.sequence,
+          headEventId: lastEvent.eventId,
+          headChainHash: lastEvent.chainHash,
+          eventCount: events.length
+        });
+      }
+
+      // 2. Replay all events through the pure projection reducer
+      const projectedRecords = projectEventsToRecords(events);
+
+      for (const [id, record] of projectedRecords.entries()) {
+        if (quarantinedIds.has(id)) {
+          continue;
         }
-        continue;
+        this.index.set(id, record);
+        const numId = Number.parseInt(id, 10);
+        if (!Number.isNaN(numId) && numId > this.highestId) {
+          this.highestId = numId;
+        }
       }
 
-      if (!filename.endsWith('.json')) {
-        continue;
-      }
-
-      let content;
+      // 3. Sync derived projection files to disk
+      writeProjectedRecords(this.ledgerDir, this.index);
+    } else if (fs.existsSync(this.recordsDir)) {
+      // Legacy ledger fallback: migrate existing records to event journal
+      let filenames = [];
       try {
-        content = fs.readFileSync(filePath, 'utf8');
-      } catch (readErr) {
-        this.quarantineFile(filePath, filename, `Unreadable file: ${readErr.message}`);
-        continue;
+        filenames = fs.readdirSync(this.recordsDir);
+      } catch {
+        return;
       }
 
-      let parsed;
-      try {
-        parsed = JSON.parse(content);
-      } catch (parseErr) {
-        this.quarantineFile(filePath, filename, `Malformed JSON: ${parseErr.message}`);
-        continue;
+      const legacyRecords = [];
+      for (const filename of filenames) {
+        if (!filename.endsWith('.json')) continue;
+        const filePath = path.join(this.recordsDir, filename);
+
+        let content;
+        try {
+          content = fs.readFileSync(filePath, 'utf8');
+          const parsed = JSON.parse(content);
+          if (isValidRecord(parsed)) {
+            legacyRecords.push(normalizeRecordToCurrentSchema(parsed));
+          }
+        } catch {
+          // Ignore unreadable legacy files
+        }
       }
 
-      if (!isValidRecord(parsed)) {
-        this.quarantineFile(filePath, filename, 'Schema validation failed: missing required fields');
-        continue;
+      // Sort legacy records numerically by ID
+      legacyRecords.sort((a, b) => Number(a.id) - Number(b.id));
+
+      for (const rec of legacyRecords) {
+        // Synthesize initial failure event
+        appendJournalEvent(this.ledgerDir, {
+          type: rec.status === IncidentStatus.REGRESSED ? 'regression.detected' : 'failure.observed',
+          incidentId: rec.id,
+          payload: {
+            command: rec.command || '',
+            args: Array.isArray(rec.args) ? rec.args : [],
+            fullCommand: rec.fullCommand || `${rec.command || ''} ${(rec.args || []).join(' ')}`.trim(),
+            cwd: rec.cwd || '',
+            exitCode: typeof rec.exitCode === 'number' ? rec.exitCode : 1,
+            signal: rec.signal || null,
+            durationMs: typeof rec.durationMs === 'number' ? rec.durationMs : 0,
+            fingerprint: rec.fingerprint || '',
+            normalizedError: rec.normalizedError || '',
+            evidenceHash: rec.evidenceHash || '',
+            evidenceRef: rec.evidenceRef || '',
+            stderrSnippet: rec.stderr || '',
+            stdoutSnippet: rec.stdout || '',
+            isTruncated: Boolean(rec.isTruncated),
+            environment: rec.environment || {},
+            git: rec.git || { isGit: false },
+            regressionOf: rec.regressionOf || null
+          }
+        });
+
+        // Synthesize recovery attempts if any
+        if (Array.isArray(rec.recoveryAttempts)) {
+          for (const att of rec.recoveryAttempts) {
+            appendJournalEvent(this.ledgerDir, {
+              type: 'recovery.proposed',
+              incidentId: rec.id,
+              payload: {
+                attemptId: att.id || 1,
+                cause: att.cause || null,
+                change: att.change || null,
+                verifyCmd: att.verifyCmd || null
+              }
+            });
+
+            if (Array.isArray(att.verificationRuns)) {
+              for (const run of att.verificationRuns) {
+                appendJournalEvent(this.ledgerDir, {
+                  type: 'verification.run',
+                  incidentId: rec.id,
+                  payload: {
+                    attemptId: att.id || 1,
+                    runId: run.id || 1,
+                    command: run.command || '',
+                    exitCode: typeof run.exitCode === 'number' ? run.exitCode : 0,
+                    durationMs: typeof run.durationMs === 'number' ? run.durationMs : 0,
+                    output: run.output || '',
+                    outputHash: run.outputHash || crypto.createHash('sha256').update(run.output || '', 'utf8').digest('hex'),
+                    environmentFingerprint: run.environmentFingerprint || '',
+                    result: run.result || (run.exitCode === 0 ? 'PASSED' : 'FAILED')
+                  }
+                });
+              }
+            }
+          }
+        }
       }
 
-      // Valid record: normalize to current schema and store in memory
-      const normalized = normalizeRecordToCurrentSchema(parsed);
-      this.index.set(normalized.id, normalized);
+      // Re-read newly generated journal
+      const reloaded = readJournalEvents(this.journalPath);
+      const replayed = projectEventsToRecords(reloaded.events);
 
-      const numId = Number.parseInt(normalized.id, 10);
+      for (const [id, record] of replayed.entries()) {
+        this.index.set(id, record);
+        const numId = Number.parseInt(id, 10);
+        if (!Number.isNaN(numId) && numId > this.highestId) {
+          this.highestId = numId;
+        }
+      }
+
+      writeProjectedRecords(this.ledgerDir, replayed);
+    }
+  }
+
+  /**
+   * Rebuilds all derived incident files and in-memory indexes by replaying the authoritative journal.
+   * Never modifies or alters journal.jsonl.
+   *
+   * @returns {{ eventsReplayed: number, incidentsDerived: number }}
+   */
+  rebuildProjections() {
+    if (!this.initialized) {
+      this.init();
+    }
+
+    const { events } = readJournalEvents(this.journalPath);
+    const projected = projectEventsToRecords(events);
+
+    this.index.clear();
+    this.highestId = 0;
+
+    for (const [id, record] of projected.entries()) {
+      this.index.set(id, record);
+      const numId = Number.parseInt(id, 10);
       if (!Number.isNaN(numId) && numId > this.highestId) {
         this.highestId = numId;
       }
     }
+
+    writeProjectedRecords(this.ledgerDir, projected);
+
+    return {
+      eventsReplayed: events.length,
+      incidentsDerived: projected.size
+    };
+  }
+
+  /**
+   * Performs a 4-layer read-only integrity audit across journal, checkpoint, and projections.
+   *
+   * @returns {object} - Comprehensive integrity report
+   */
+  verifyIntegrity() {
+    return verifyLedgerIntegrity(this.ledgerDir);
   }
 
   /**
@@ -216,9 +381,8 @@ export class StorageEngine {
   }
 
   /**
-   * Saves a command capture result as an immutable record on disk using
-   * crash-safe atomic write (write tmp -> fsync -> rename) with 0o600 permissions.
-   * Automatically detects regressions if matching a previously verified failure.
+   * Saves a command capture result as an immutable event in the authoritative journal,
+   * updates the trusted checkpoint, and writes derived projection files.
    *
    * @param {import('../capture.js').CaptureRecord} captureResult
    * @param {object} [options]
@@ -235,16 +399,16 @@ export class StorageEngine {
     let initialState = options.initialState;
     let regressionOf = options.regressionOf || null;
 
-    if (!captureResult.success && !initialState) {
-      const { fingerprint } = computeFingerprint({
-        command: captureResult.command,
-        args: captureResult.args,
-        exitCode: captureResult.exitCode,
-        signal: captureResult.signal,
-        stderr: captureResult.stderr,
-        stdout: captureResult.stdout
-      });
+    const { fingerprint, normalizedError } = computeFingerprint({
+      command: captureResult.command || '',
+      args: captureResult.args || [],
+      exitCode: captureResult.exitCode,
+      signal: captureResult.signal,
+      stderr: captureResult.stderr || '',
+      stdout: captureResult.stdout || ''
+    });
 
+    if (!captureResult.success && !initialState) {
       const priorVerified = this.findVerifiedByFingerprint(fingerprint);
       if (priorVerified) {
         initialState = IncidentStatus.REGRESSED;
@@ -254,102 +418,52 @@ export class StorageEngine {
       }
     }
 
-    const record = createRecord(id, captureResult, {
-      initialState,
-      regressionOf
+    // Process heavy evidence: save to isolated evidence store and bound output
+    const rawStderr = captureResult.stderr || '';
+    const rawStdout = captureResult.stdout || '';
+    const fullOutput = rawStderr + (rawStderr && rawStdout ? '\n' : '') + rawStdout;
+
+    const { evidenceHash, evidenceRef } = saveEvidenceArtifact(this.ledgerDir, fullOutput);
+    const boundStderr = boundOutput(rawStderr);
+    const boundStdout = boundOutput(rawStdout);
+    const isTruncated = boundStderr.truncated || boundStdout.truncated;
+
+    const eventType = initialState === IncidentStatus.REGRESSED ? 'regression.detected' : 'failure.observed';
+
+    // Append to authoritative journal (with exclusive lock, fsync, and checkpoint update)
+    appendJournalEvent(this.ledgerDir, {
+      type: eventType,
+      incidentId: id,
+      payload: {
+        command: captureResult.command || '',
+        args: Array.isArray(captureResult.args) ? captureResult.args : [],
+        fullCommand: captureResult.fullCommand || `${captureResult.command || ''} ${(captureResult.args || []).join(' ')}`.trim(),
+        cwd: captureResult.cwd || '',
+        durationMs: typeof captureResult.durationMs === 'number' ? captureResult.durationMs : 0,
+        exitCode: typeof captureResult.exitCode === 'number' ? captureResult.exitCode : 1,
+        signal: captureResult.signal || null,
+        fingerprint: fingerprint || '',
+        normalizedError: normalizedError || '',
+        evidenceHash: evidenceHash || '',
+        evidenceRef: evidenceRef || '',
+        stderrSnippet: boundStderr.bounded || '',
+        stdoutSnippet: boundStdout.bounded || '',
+        isTruncated: Boolean(isTruncated),
+        environment: captureResult.environment || {},
+        git: captureResult.git || { isGit: false },
+        regressionOf: regressionOf || null
+      }
     });
 
-    const jsonContent = JSON.stringify(record, null, 2);
+    // Replay projection for the new event and update in-memory index
+    this.rebuildIndex();
 
-    // 1. Write to temporary file with unique UUID in tmp directory with strict permissions
-    const tempFilename = `${id}_${Date.now()}_${crypto.randomUUID().slice(0, 8)}.tmp`;
-    const tempFilePath = path.join(this.tmpDir, tempFilename);
-
-    const fd = fs.openSync(tempFilePath, 'w', 0o600);
-    try {
-      fs.writeSync(fd, jsonContent);
-      fs.fsyncSync(fd);
-    } finally {
-      fs.closeSync(fd);
-    }
-
-    // 2. Atomically rename temporary file to destination record path
-    const destinationPath = path.join(this.recordsDir, `${id}.json`);
-    fs.renameSync(tempFilePath, destinationPath);
-
-    // 3. Update in-memory index
-    this.index.set(id, record);
-    const numId = Number.parseInt(id, 10);
-    if (!Number.isNaN(numId) && numId > this.highestId) {
-      this.highestId = numId;
-    }
-
+    const record = this.index.get(id);
     return record;
   }
 
   /**
-   * Atomically updates an existing record on disk and in memory.
-   *
-   * @param {string|number} id
-   * @param {(current: import('./record.js').IncidentRecord) => import('./record.js').IncidentRecord} updaterFn
-   * @returns {import('./record.js').IncidentRecord}
-   */
-  updateRecord(id, updaterFn) {
-    if (!this.initialized) {
-      this.init();
-    }
-
-    const strId = normalizeId(id);
-    if (!/^\d+$/.test(strId)) {
-      throw new CliError(`Invalid incident ID format: "${id}". Incident IDs must be positive integers.`, {
-        code: 'ERR_INVALID_ID',
-        exitCode: 1,
-        details: { suggestion: 'Run "rewind history" to browse all past incidents.' }
-      });
-    }
-
-    const existing = this.getRecord(strId);
-    if (!existing) {
-      throw new CliError(`Incident #${strId} not found in ledger.`, {
-        code: 'ERR_NOT_FOUND',
-        exitCode: 1,
-        details: { id: strId, suggestion: 'Run "rewind history" to browse all past incidents.' }
-      });
-    }
-
-    const updated = updaterFn(existing);
-    if (!isValidRecord(updated)) {
-      throw new CliError(`Record update failed schema validation for Incident #${strId}.`, { code: 'ERR_VALIDATION' });
-    }
-
-    const normalized = normalizeRecordToCurrentSchema(updated);
-    const frozen = Object.freeze(normalized);
-    const jsonContent = JSON.stringify(frozen, null, 2);
-
-    // 1. Atomic write to tmp with 0o600 permissions
-    const tempFilename = `${strId}_update_${Date.now()}_${crypto.randomUUID().slice(0, 8)}.tmp`;
-    const tempFilePath = path.join(this.tmpDir, tempFilename);
-
-    const fd = fs.openSync(tempFilePath, 'w', 0o600);
-    try {
-      fs.writeSync(fd, jsonContent);
-      fs.fsyncSync(fd);
-    } finally {
-      fs.closeSync(fd);
-    }
-
-    // 2. Atomic rename
-    const destinationPath = path.join(this.recordsDir, `${strId}.json`);
-    fs.renameSync(tempFilePath, destinationPath);
-
-    // 3. Update in-memory index
-    this.index.set(strId, frozen);
-
-    return frozen;
-  }
-
-  /**
-   * Appends a new recovery attempt to an incident record.
+   * Appends a new recovery attempt event to the authoritative journal and updates derived state.
    *
    * @param {string|number} id
    * @param {object} attemptData
@@ -359,30 +473,43 @@ export class StorageEngine {
    * @returns {import('./record.js').IncidentRecord}
    */
   addRecoveryAttempt(id, attemptData) {
-    return this.updateRecord(id, (current) => {
-      const currentAttempts = Array.isArray(current.recoveryAttempts) ? current.recoveryAttempts : [];
-      const newAttemptId = currentAttempts.length + 1;
+    if (!this.initialized) {
+      this.init();
+    }
 
-      const newAttempt = {
-        id: newAttemptId,
-        createdAt: new Date().toISOString(),
+    const strId = normalizeId(id);
+    const existing = this.getRecord(strId);
+    if (!existing) {
+      throw new CliError(`Incident #${strId} not found in ledger.`, {
+        code: 'ERR_NOT_FOUND',
+        exitCode: 1,
+        details: { id: strId, suggestion: 'Run "rewind history" to browse all past incidents.' }
+      });
+    }
+
+    const currentAttempts = Array.isArray(existing.recoveryAttempts) ? existing.recoveryAttempts : [];
+    const attemptId = currentAttempts.length + 1;
+
+    // Append recovery.proposed event to authoritative journal
+    appendJournalEvent(this.ledgerDir, {
+      type: 'recovery.proposed',
+      incidentId: strId,
+      payload: {
+        attemptId,
         cause: attemptData.cause || null,
         change: attemptData.change || null,
-        verifyCmd: attemptData.verifyCmd || null,
-        status: RecoveryAttemptStatus.PROPOSED,
-        verificationRuns: []
-      };
-
-      return {
-        ...current,
-        status: IncidentStatus.OPEN,
-        recoveryAttempts: [...currentAttempts, newAttempt]
-      };
+        verifyCmd: attemptData.verifyCmd || null
+      }
     });
+
+    // Replay projection and refresh in-memory state
+    this.rebuildIndex();
+
+    return this.getRecord(strId);
   }
 
   /**
-   * Records a verification execution run on a specific recovery attempt.
+   * Records a verification execution run on a specific recovery attempt in the authoritative journal.
    *
    * @param {string|number} id
    * @param {number} attemptId
@@ -395,44 +522,90 @@ export class StorageEngine {
    * @returns {import('./record.js').IncidentRecord}
    */
   recordVerificationRun(id, attemptId, runData) {
-    return this.updateRecord(id, (current) => {
-      const currentAttempts = Array.isArray(current.recoveryAttempts) ? [...current.recoveryAttempts] : [];
-      const attemptIndex = currentAttempts.findIndex(a => a.id === attemptId);
+    if (!this.initialized) {
+      this.init();
+    }
 
-      if (attemptIndex === -1) {
-        throw new CliError(`Attempt #${attemptId} not found in Incident #${id}.`);
-      }
+    const strId = normalizeId(id);
+    const existing = this.getRecord(strId);
+    if (!existing) {
+      throw new CliError(`Incident #${strId} not found in ledger.`, {
+        code: 'ERR_NOT_FOUND',
+        exitCode: 1,
+        details: { id: strId, suggestion: 'Run "rewind history" to browse all past incidents.' }
+      });
+    }
 
-      const targetAttempt = { ...currentAttempts[attemptIndex] };
-      const currentRuns = Array.isArray(targetAttempt.verificationRuns) ? targetAttempt.verificationRuns : [];
-      const newRunId = currentRuns.length + 1;
-      const isPassed = runData.exitCode === 0;
+    const currentAttempts = Array.isArray(existing.recoveryAttempts) ? existing.recoveryAttempts : [];
+    const targetAttempt = currentAttempts.find(a => a.id === attemptId);
+    if (!targetAttempt) {
+      throw new CliError(`Attempt #${attemptId} not found in Incident #${strId}.`);
+    }
 
-      const newRun = {
-        id: newRunId,
-        startedAt: new Date(Date.now() - (runData.durationMs || 0)).toISOString(),
-        completedAt: new Date().toISOString(),
+    const currentRuns = Array.isArray(targetAttempt.verificationRuns) ? targetAttempt.verificationRuns : [];
+    const runId = currentRuns.length + 1;
+    const isPassed = runData.exitCode === 0;
+    const outputContent = runData.output || '';
+    const outputHash = crypto.createHash('sha256').update(outputContent, 'utf8').digest('hex');
+
+    // Append verification.run event to authoritative journal
+    appendJournalEvent(this.ledgerDir, {
+      type: 'verification.run',
+      incidentId: strId,
+      payload: {
+        attemptId,
+        runId,
         command: runData.command,
         exitCode: runData.exitCode,
         durationMs: runData.durationMs || 0,
-        output: runData.output || '',
-        outputHash: crypto.createHash('sha256').update(runData.output || '', 'utf8').digest('hex'),
-        environmentFingerprint: runData.environmentFingerprint || current.environment?.fingerprint || '',
+        output: outputContent,
+        outputHash,
+        environmentFingerprint: runData.environmentFingerprint || existing.environment?.fingerprint || '',
         result: isPassed ? 'PASSED' : 'FAILED'
-      };
-
-      targetAttempt.status = isPassed ? RecoveryAttemptStatus.VERIFIED : RecoveryAttemptStatus.FAILED;
-      targetAttempt.verificationRuns = [...currentRuns, newRun];
-      currentAttempts[attemptIndex] = targetAttempt;
-
-      const updatedIncidentStatus = isPassed ? IncidentStatus.RECOVERED : current.status;
-
-      return {
-        ...current,
-        status: updatedIncidentStatus,
-        recoveryAttempts: currentAttempts
-      };
+      }
     });
+
+    // Replay projection and refresh in-memory state
+    this.rebuildIndex();
+
+    return this.getRecord(strId);
+  }
+
+  /**
+   * Compatibility method for updating arbitrary fields via updater function.
+   *
+   * @param {string|number} id
+   * @param {(current: import('./record.js').IncidentRecord) => import('./record.js').IncidentRecord} updaterFn
+   * @returns {import('./record.js').IncidentRecord}
+   */
+  updateRecord(id, updaterFn) {
+    if (!this.initialized) {
+      this.init();
+    }
+
+    const strId = normalizeId(id);
+    const existing = this.getRecord(strId);
+    if (!existing) {
+      throw new CliError(`Incident #${strId} not found in ledger.`, {
+        code: 'ERR_NOT_FOUND',
+        exitCode: 1,
+        details: { id: strId, suggestion: 'Run "rewind history" to browse all past incidents.' }
+      });
+    }
+
+    const updated = updaterFn(existing);
+    const normalized = normalizeRecordToCurrentSchema(updated);
+
+    // If updating recoveries/attempts, append events
+    if (updated.recoveryAttempts && updated.recoveryAttempts.length > (existing.recoveryAttempts || []).length) {
+      const latestAttempt = updated.recoveryAttempts[updated.recoveryAttempts.length - 1];
+      return this.addRecoveryAttempt(strId, latestAttempt);
+    }
+
+    // Otherwise sync directly
+    this.index.set(strId, normalized);
+    writeProjectedRecords(this.ledgerDir, this.index);
+    return normalized;
   }
 
   /**
@@ -449,30 +622,29 @@ export class StorageEngine {
   }
 
   /**
-   * Retrieves all failed remediation attempts for a failure fingerprint.
+   * Extracts all known failed recovery approaches across a failure family.
    *
    * @param {string} fingerprint
-   * @returns {import('./negative_memory.js').FailedApproach[]}
+   * @returns {Array<import('./negative_memory.js').FailedApproach>}
    */
   getNegativeMemory(fingerprint) {
-    const matching = this.findByFingerprint(fingerprint);
-    return extractNegativeMemory(matching);
+    const familyRecords = this.findByFingerprint(fingerprint);
+    return extractNegativeMemory(familyRecords);
   }
 
   /**
-   * Detects conflicting or divergent verification evidence for a failure fingerprint.
+   * Analyzes contradictory or divergent verification evidence across a failure family.
    *
    * @param {string} fingerprint
-   * @returns {import('./contradiction.js').EvidenceConflictReport}
+   * @returns {import('./contradiction.js').ConflictReport}
    */
   getContradictionReport(fingerprint) {
-    const matching = this.findByFingerprint(fingerprint);
-    return analyzeEvidenceConflicts(fingerprint, matching);
+    const familyRecords = this.findByFingerprint(fingerprint);
+    return analyzeEvidenceConflicts(fingerprint, familyRecords);
   }
 
   /**
-   * Retrieves a record by ID from the in-memory index.
-   * Strictly validates numeric ID to prevent path traversal attempts.
+   * Retrieves an incident record by ID.
    *
    * @param {string|number} id
    * @returns {import('./record.js').IncidentRecord|null}
@@ -482,14 +654,11 @@ export class StorageEngine {
       this.init();
     }
     const strId = normalizeId(id);
-    if (!/^\d+$/.test(strId)) {
-      return null;
-    }
     return this.index.get(strId) || null;
   }
 
   /**
-   * Returns all stored records sorted by numeric ID / creation order.
+   * Returns all active incident records ordered by ID ascending.
    *
    * @returns {Array<import('./record.js').IncidentRecord>}
    */
@@ -497,23 +666,15 @@ export class StorageEngine {
     if (!this.initialized) {
       this.init();
     }
-    return Array.from(this.index.values()).sort((a, b) => {
-      const idA = Number.parseInt(a.id, 10);
-      const idB = Number.parseInt(b.id, 10);
-      if (!Number.isNaN(idA) && !Number.isNaN(idB)) {
-        return idA - idB;
-      }
-      return a.id.localeCompare(b.id);
-    });
+    return Array.from(this.index.values()).sort((a, b) => Number(a.id) - Number(b.id));
   }
 
   /**
-   * Returns list of any files quarantined during startup.
+   * Returns list of currently quarantined files.
    *
    * @returns {Array<{ file: string, reason: string, quarantinedAt: string }>}
    */
   getQuarantined() {
-    return [...this.quarantined];
+    return this.quarantined;
   }
 }
-

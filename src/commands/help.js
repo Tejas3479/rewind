@@ -99,6 +99,34 @@ const COMMAND_DOCS = {
       'rewind search "ECONNREFUSED"',
       'rewind search 83282360259b'
     ]
+  },
+  'verify-integrity': {
+    usage: 'rewind verify-integrity [options]',
+    description: 'Perform a strictly read-only 4-layer cryptographic audit across the journal, hash chain, checkpoint, and derived views.',
+    arguments: [],
+    options: [
+      { flag: '--json', description: 'Output audit report as JSON' },
+      { flag: '--no-color', description: 'Disable ANSI color formatting' },
+      { flag: '--root <path>', description: 'Explicit project root / ledger directory' }
+    ],
+    examples: [
+      'rewind verify-integrity',
+      'rewind verify-integrity --json'
+    ]
+  },
+  rebuild: {
+    usage: 'rewind rebuild [options]',
+    description: 'Reconstruct all derived incident projection records in .rewind/records/ from the authoritative journal.',
+    arguments: [],
+    options: [
+      { flag: '--json', description: 'Output rebuild summary as JSON' },
+      { flag: '--no-color', description: 'Disable ANSI color formatting' },
+      { flag: '--root <path>', description: 'Explicit project root / ledger directory' }
+    ],
+    examples: [
+      'rewind rebuild',
+      'rewind rebuild --json'
+    ]
   }
 };
 
@@ -117,17 +145,19 @@ export function formatTopLevelHelp(s) {
     `  ${s.cyan('rewind')} ${s.yellow('<command>')} [options]`,
     '',
     `${s.bold('CORE WORKFLOW:')}`,
-    `  1. ${s.cyan('rewind run <command...>')}      Run command, stream output, and record failures on error`,
-    `  2. ${s.cyan('rewind history')}               Browse timeline of past failures and recovery states`,
-    `  3. ${s.cyan('rewind show <id>')}             Inspect full forensic logs, environment, and error fingerprint`,
-    `  4. ${s.cyan('rewind recover <id>')}          Record suspected cause, fix, and explicit verification command`,
-    `  5. ${s.cyan('rewind verify <id>')}           Run the user-approved verification command to validate and seal fix`,
-    `  6. ${s.cyan('rewind search <query...>')}     Search past failures by keyword, error text, or fingerprint`,
+    `  1. ${s.cyan('rewind run <command...>')}          Run command, stream output, and record failures on error`,
+    `  2. ${s.cyan('rewind history')}                   Browse timeline of past failures and recovery states`,
+    `  3. ${s.cyan('rewind show <id>')}                 Inspect full forensic logs, environment, and error fingerprint`,
+    `  4. ${s.cyan('rewind recover <id>')}              Record suspected cause, fix, and explicit verification command`,
+    `  5. ${s.cyan('rewind verify <id>')}               Run user-approved verification command to validate and seal fix`,
+    `  6. ${s.cyan('rewind search <query...>')}         Search past failures by keyword, error text, or fingerprint`,
+    `  7. ${s.cyan('rewind verify-integrity')}          Audit cryptographic hash chain and checkpoint integrity`,
+    `  8. ${s.cyan('rewind rebuild')}                   Reconstruct derived incident views from immutable journal`,
     '',
     `${s.bold('GLOBAL OPTIONS:')}`,
-    `  ${s.yellow('-h, --help')}                    Show help information`,
-    `  ${s.yellow('-v, --version')}                 Show version number`,
-    `  ${s.yellow('--json')}                        Output results as machine-readable JSON (read-only commands)`,
+    `  ${s.yellow('-h, --help')}                        Show help information`,
+    `  ${s.yellow('-v, --version')}                     Show version number`,
+    `  ${s.yellow('--json')}                            Output results as machine-readable JSON (read-only commands)`,
     `  ${s.yellow('--no-color')}                    Disable ANSI color formatting (also respects NO_COLOR)`,
     `  ${s.yellow('--root <path>')}                 Specify project root / ledger location`,
     `  ${s.yellow('-n, --limit <N>')}               Limit number of results in history and search`,

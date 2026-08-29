@@ -237,13 +237,15 @@ export function normalizeRecordToCurrentSchema(record) {
 
   if (latestRun) {
     copy.verification = {
-      verifiedAt: latestRun.result === 'PASSED' ? latestRun.completedAt : undefined,
-      lastAttemptAt: latestRun.result === 'FAILED' ? latestRun.completedAt : undefined,
-      command: latestRun.command,
-      exitCode: latestRun.exitCode,
-      durationMs: latestRun.durationMs,
-      output: latestRun.output
+      verifiedAt: latestRun.result === 'PASSED' ? latestRun.completedAt : null,
+      lastAttemptAt: latestRun.result === 'FAILED' ? latestRun.completedAt : null,
+      command: latestRun.command || null,
+      exitCode: typeof latestRun.exitCode === 'number' ? latestRun.exitCode : null,
+      durationMs: typeof latestRun.durationMs === 'number' ? latestRun.durationMs : 0,
+      output: latestRun.output || ''
     };
+  } else {
+    copy.verification = null;
   }
 
   return Object.freeze(copy);

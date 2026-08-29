@@ -1,0 +1,268 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import { IncidentStatus, RecoveryAttemptStatus } from './state.js';
+import { normalizeRecordToCurrentSchema } from './record.js';
+
+export const PROJECTION_SCHEMA_VERSION = 1;
+
+/**
+ * Pure deterministic reducer that replays journal events in chronological sequence
+ * to derive the complete set of active IncidentRecord views.
+ *
+ * @param {Array<object>} events - Ordered journal events
+ * @returns {Map<string, import('./record.js').IncidentRecord>}
+ */
+export function projectEventsToRecords(events = []) {
+  const incidents = new Map();
+
+  for (const event of events) {
+    if (!event || !event.type || !event.incidentId) {
+      continue;
+    }
+
+    const id = String(event.incidentId);
+
+    switch (event.type) {
+      case 'failure.observed': {
+        const payload = event.payload || {};
+        const newRecord = {
+          id,
+          fingerprint: payload.fingerprint || '',
+          command: payload.command || '',
+          args: Array.isArray(payload.args) ? payload.args : [],
+          fullCommand: payload.fullCommand || `${payload.command || ''} ${(payload.args || []).join(' ')}`.trim(),
+          cwd: payload.cwd || '',
+          startTime: payload.startTime || event.timestamp,
+          endTime: payload.endTime || event.timestamp,
+          durationMs: payload.durationMs || 0,
+          exitCode: payload.exitCode ?? 1,
+          signal: payload.signal || null,
+          status: IncidentStatus.OBSERVED,
+          stdout: payload.stdoutSnippet || payload.stdout || '',
+          stderr: payload.stderrSnippet || payload.stderr || '',
+          normalizedError: payload.normalizedError || '',
+          evidenceHash: payload.evidenceHash || '',
+          evidenceRef: payload.evidenceRef || '',
+          isTruncated: Boolean(payload.isTruncated),
+          git: payload.git || { isGit: false },
+          environment: payload.environment || {},
+          regressionOf: null,
+          recoveryAttempts: [],
+          _projection: {
+            notice: 'DERIVED AND REBUILDABLE. Authoritative source of truth is .rewind/journal.jsonl',
+            projectionSchemaVersion: PROJECTION_SCHEMA_VERSION,
+            derivedFromSequence: event.sequence,
+            projectedAt: event.timestamp
+          }
+        };
+        incidents.set(id, normalizeRecordToCurrentSchema(newRecord));
+        break;
+      }
+
+      case 'regression.detected': {
+        const payload = event.payload || {};
+        const newRecord = {
+          id,
+          fingerprint: payload.fingerprint || '',
+          command: payload.command || '',
+          args: Array.isArray(payload.args) ? payload.args : [],
+          fullCommand: payload.fullCommand || `${payload.command || ''} ${(payload.args || []).join(' ')}`.trim(),
+          cwd: payload.cwd || '',
+          startTime: payload.startTime || event.timestamp,
+          endTime: payload.endTime || event.timestamp,
+          durationMs: payload.durationMs || 0,
+          exitCode: payload.exitCode ?? 1,
+          signal: payload.signal || null,
+          status: IncidentStatus.REGRESSED,
+          stdout: payload.stdoutSnippet || payload.stdout || '',
+          stderr: payload.stderrSnippet || payload.stderr || '',
+          normalizedError: payload.normalizedError || '',
+          evidenceHash: payload.evidenceHash || '',
+          evidenceRef: payload.evidenceRef || '',
+          isTruncated: Boolean(payload.isTruncated),
+          git: payload.git || { isGit: false },
+          environment: payload.environment || {},
+          regressionOf: payload.regressionOf ? String(payload.regressionOf) : null,
+          recoveryAttempts: [],
+          _projection: {
+            notice: 'DERIVED AND REBUILDABLE. Authoritative source of truth is .rewind/journal.jsonl',
+            projectionSchemaVersion: PROJECTION_SCHEMA_VERSION,
+            derivedFromSequence: event.sequence,
+            projectedAt: event.timestamp
+          }
+        };
+        incidents.set(id, normalizeRecordToCurrentSchema(newRecord));
+        break;
+      }
+
+      case 'recovery.proposed': {
+        const existing = incidents.get(id);
+        if (!existing) break;
+
+        const payload = event.payload || {};
+        const currentAttempts = Array.isArray(existing.recoveryAttempts) ? [...existing.recoveryAttempts] : [];
+        const attemptId = payload.attemptId || (currentAttempts.length + 1);
+
+        const newAttempt = {
+          id: attemptId,
+          createdAt: event.timestamp,
+          cause: payload.cause || null,
+          change: payload.change || null,
+          verifyCmd: payload.verifyCmd || null,
+          status: RecoveryAttemptStatus.PROPOSED,
+          verificationRuns: []
+        };
+
+        const updated = {
+          ...existing,
+          status: IncidentStatus.OPEN,
+          recoveryAttempts: [...currentAttempts, newAttempt],
+          _projection: {
+            notice: 'DERIVED AND REBUILDABLE. Authoritative source of truth is .rewind/journal.jsonl',
+            projectionSchemaVersion: PROJECTION_SCHEMA_VERSION,
+            derivedFromSequence: event.sequence,
+            projectedAt: event.timestamp
+          }
+        };
+        incidents.set(id, normalizeRecordToCurrentSchema(updated));
+        break;
+      }
+
+      case 'verification.run': {
+        const existing = incidents.get(id);
+        if (!existing) break;
+
+        const payload = event.payload || {};
+        const currentAttempts = Array.isArray(existing.recoveryAttempts) ? [...existing.recoveryAttempts] : [];
+        const targetAttemptId = payload.attemptId || (currentAttempts.length > 0 ? currentAttempts[currentAttempts.length - 1].id : 1);
+        const attemptIndex = currentAttempts.findIndex(a => a.id === targetAttemptId);
+
+        if (attemptIndex !== -1) {
+          const targetAttempt = { ...currentAttempts[attemptIndex] };
+          const currentRuns = Array.isArray(targetAttempt.verificationRuns) ? [...targetAttempt.verificationRuns] : [];
+          const runId = payload.runId || (currentRuns.length + 1);
+          const isPassed = payload.exitCode === 0;
+
+          const newRun = {
+            id: runId,
+            startedAt: payload.startedAt || event.timestamp,
+            completedAt: event.timestamp,
+            command: payload.command || targetAttempt.verifyCmd || '',
+            exitCode: payload.exitCode ?? (isPassed ? 0 : 1),
+            durationMs: payload.durationMs || 0,
+            output: payload.output || '',
+            outputHash: payload.outputHash || crypto.createHash('sha256').update(payload.output || '', 'utf8').digest('hex'),
+            environmentFingerprint: payload.environmentFingerprint || existing.environment?.fingerprint || '',
+            result: isPassed ? 'PASSED' : 'FAILED'
+          };
+
+          targetAttempt.status = isPassed ? RecoveryAttemptStatus.VERIFIED : RecoveryAttemptStatus.FAILED;
+          targetAttempt.verificationRuns = [...currentRuns, newRun];
+          currentAttempts[attemptIndex] = targetAttempt;
+
+          const updatedIncidentStatus = isPassed ? IncidentStatus.RECOVERED : existing.status;
+
+          const updated = {
+            ...existing,
+            status: updatedIncidentStatus,
+            recoveryAttempts: currentAttempts,
+            _projection: {
+              notice: 'DERIVED AND REBUILDABLE. Authoritative source of truth is .rewind/journal.jsonl',
+              projectionSchemaVersion: PROJECTION_SCHEMA_VERSION,
+              derivedFromSequence: event.sequence,
+              projectedAt: event.timestamp
+            }
+          };
+          incidents.set(id, normalizeRecordToCurrentSchema(updated));
+        }
+        break;
+      }
+
+      case 'incident.resolved': {
+        const existing = incidents.get(id);
+        if (!existing) break;
+
+        const updated = {
+          ...existing,
+          status: IncidentStatus.RESOLVED,
+          _projection: {
+            notice: 'DERIVED AND REBUILDABLE. Authoritative source of truth is .rewind/journal.jsonl',
+            projectionSchemaVersion: PROJECTION_SCHEMA_VERSION,
+            derivedFromSequence: event.sequence,
+            projectedAt: event.timestamp
+          }
+        };
+        incidents.set(id, normalizeRecordToCurrentSchema(updated));
+        break;
+      }
+    }
+  }
+
+  return incidents;
+}
+
+/**
+ * Reconstructs all derived incident files in .rewind/records/ from the projected state.
+ *
+ * Invariants:
+ * 1. .rewind/records/ is strictly derived and rebuildable.
+ * 2. Writes atomically using tmp file and fsync before rename.
+ * 3. Never mutates or alters journal.jsonl.
+ *
+ * @param {string} ledgerDir - Path to .rewind
+ * @param {Map<string, import('./record.js').IncidentRecord>} projectedRecords
+ * @returns {{ writtenCount: number, removedCount: number }}
+ */
+export function writeProjectedRecords(ledgerDir, projectedRecords) {
+  const recordsDir = path.join(ledgerDir, 'records');
+  const tmpDir = path.join(ledgerDir, 'tmp');
+
+  if (!fs.existsSync(recordsDir)) {
+    fs.mkdirSync(recordsDir, { recursive: true, mode: 0o700 });
+  }
+  if (!fs.existsSync(tmpDir)) {
+    fs.mkdirSync(tmpDir, { recursive: true, mode: 0o700 });
+  }
+
+  let writtenCount = 0;
+  const activeIds = new Set();
+
+  for (const [id, record] of projectedRecords.entries()) {
+    activeIds.add(`${id}.json`);
+    const jsonContent = JSON.stringify(record, null, 2);
+    const tmpPath = path.join(tmpDir, `proj_${id}_${Date.now()}_${crypto.randomUUID().slice(0, 8)}.tmp`);
+
+    const fd = fs.openSync(tmpPath, 'w', 0o600);
+    try {
+      fs.writeSync(fd, jsonContent);
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
+
+    const destPath = path.join(recordsDir, `${id}.json`);
+    fs.renameSync(tmpPath, destPath);
+    writtenCount++;
+  }
+
+  // Clean up any extraneous record files that are not in the projection
+  let removedCount = 0;
+  try {
+    const existingFiles = fs.readdirSync(recordsDir);
+    for (const file of existingFiles) {
+      if (file.endsWith('.json') && !activeIds.has(file)) {
+        try {
+          fs.unlinkSync(path.join(recordsDir, file));
+          removedCount++;
+        } catch {
+          // Ignore removal error
+        }
+      }
+    }
+  } catch {
+    // Ignore read directory error
+  }
+
+  return { writtenCount, removedCount };
+}

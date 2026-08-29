@@ -35,8 +35,14 @@ node bin/rewind.js run node -e "console.error('FATAL: Database connection pool e
 # 7. Search past remedies by keyword query
 node bin/rewind.js search "connection pool exhausted"
 
-# 8. Run the complete automated test suite (143 tests, 0 dependencies)
+# 8. Run the complete automated test suite (161 tests, 0 dependencies)
 npm test
+
+# 9. Audit cryptographic integrity of the local ledger
+node bin/rewind.js verify-integrity
+
+# 10. Rebuild derived incident projections from immutable journal
+node bin/rewind.js rebuild
 ```
 
 ---
@@ -49,13 +55,15 @@ Command history logs *what* was typed, but not *why* it failed, *what* was chang
 
 **Rewind** bridges this gap:
 1. **Captures Failures:** Wraps command execution, streaming live stdout/stderr while recording exit codes, timing, environment metadata, bounded logs with SHA-256 evidence hashing, and git HEAD status upon failure.
-2. **Preserves Evidence:** Stores crash-safe, immutable JSON records in a local `.rewind/` ledger.
-3. **Fingerprints Error Memory:** Conservatively normalizes transient noise (timestamps, PIDs, temporary paths, memory pointers) and computes reproducible 16-character SHA-256 fingerprints.
-4. **Enforces the Trust Loop & 3-Tier State Model:** Strictly separates Incident Status (`OBSERVED`, `OPEN`, `RECOVERED`, `REGRESSED`, `RESOLVED`), Recovery Attempt Status (`PROPOSED`, `ATTEMPTED`, `FAILED`, `VERIFIED`), and Derived Evidence Flags (`STALE`, `CONTRADICTED`, `DIVERGENT_EVIDENCE`).
-5. **Multi-Attempt History & Negative Memory:** Preserves every remediation attempt chronologically. When an attempt fails verification, it is permanently sealed into *Negative Memory* (`KNOWN FAILED APPROACHES`), warning developers away from repeating dead ends.
-6. **Relevance-Aware Staleness Evaluation:** Detects when a verified fix may no longer apply due to major runtime changes (e.g. Node 20 to Node 22), OS platform changes, or missing environment keys—without falsely invalidating on harmless git commits or patch bumps.
-7. **Contradiction vs. Divergence Analysis:** Detects when two historical verification runs under equivalent conditions produced conflicting outcomes (`CONTRADICTED`) vs cross-platform differences (`DIVERGENT_EVIDENCE`).
-8. **Near-Match & Exact-Match Search:** Deterministically searches historical failures using keyword recall, Jaccard overlap, exact fingerprint matching, and strict evidence confidence labels (`EXACT MATCH: VERIFIED`, `SIMILAR: VERIFIED RECOVERY`, `LIKELY PATTERN`, `NOT PROVEN`).
+2. **Authoritative Event Journal (`journal.jsonl`):** Implements an append-only, immutable event sourcing architecture where every lifecycle mutation is an immutable event cryptographically sealed with SHA-256.
+3. **Four-Layer History-Integrity Layer:** Protects the local ledger against accidental corruption, unauthorized file modification, deleted intermediate events, reordered events, tail deletion, and derived view drift.
+4. **Disposable Derived Projections (`records/`):** Incident records in `.rewind/records/` and in-memory indices are rebuildable projections derived from pure journal replay.
+5. **Fingerprints Error Memory:** Conservatively normalizes transient noise (timestamps, PIDs, temporary paths, memory pointers) and computes reproducible 16-character SHA-256 fingerprints.
+6. **Enforces the Trust Loop & 3-Tier State Model:** Strictly separates Incident Status (`OBSERVED`, `OPEN`, `RECOVERED`, `REGRESSED`, `RESOLVED`), Recovery Attempt Status (`PROPOSED`, `ATTEMPTED`, `FAILED`, `VERIFIED`), and Derived Evidence Flags (`STALE`, `CONTRADICTED`, `DIVERGENT_EVIDENCE`).
+7. **Multi-Attempt History & Negative Memory:** Preserves every remediation attempt chronologically. When an attempt fails verification, it is permanently sealed into *Negative Memory* (`KNOWN FAILED APPROACHES`), warning developers away from repeating dead ends.
+8. **Relevance-Aware Staleness Evaluation:** Detects when a verified fix may no longer apply due to major runtime changes (e.g. Node 20 to Node 22), OS platform changes, or missing environment keys—without falsely invalidating on harmless git commits or patch bumps.
+9. **Contradiction vs. Divergence Analysis:** Detects when two historical verification runs under equivalent conditions produced conflicting outcomes (`CONTRADICTED`) vs cross-platform differences (`DIVERGENT_EVIDENCE`).
+10. **Near-Match & Exact-Match Search:** Deterministically searches historical failures using keyword recall, Jaccard overlap, exact fingerprint matching, and strict evidence confidence labels (`EXACT MATCH: VERIFIED`, `SIMILAR: VERIFIED RECOVERY`, `LIKELY PATTERN`, `NOT PROVEN`).
 
 ---
 
@@ -77,6 +85,53 @@ Rewind operates on strict safety and evidentiary principles:
                                ↓ (identical failure recurs in future)
                          New Incident: REGRESSED (links to Incident #1)
 ```
+
+---
+
+## 4. Local History-Integrity Layer (Tamper Evidence)
+
+Rewind provides local cryptographic tamper evidence across four distinct verification layers:
+
+```text
+┌────────────────────────────────────────────────────────┐
+│ Layer 1: Cryptographic Event Integrity                 │
+│ Recompute eventHash = SHA-256(canonical(eventData))    │
+└───────────────────────────┬────────────────────────────┘
+                            │
+                            ▼
+┌────────────────────────────────────────────────────────┐
+│ Layer 2: Cryptographic Chain Continuity                │
+│ 1. Monotonically increasing sequence (1, 2, 3...)      │
+│ 2. UUID eventId uniqueness                             │
+│ 3. Genesis block: event[1].prevHash === 64 zeros       │
+│ 4. Predecessor link: event[N].prevHash === prevChainHash
+│ 5. chainHash = SHA-256(prevHash:eventHash)             │
+└───────────────────────────┬────────────────────────────┘
+                            │
+                            ▼
+┌────────────────────────────────────────────────────────┐
+│ Layer 3: Cryptographic Checkpoint Anchor               │
+│ Compare journal head against .rewind/checkpoint.json   │
+│ Detects tail deletion, truncation, & rewrite attacks   │
+└───────────────────────────┬────────────────────────────┘
+                            │
+                            ▼
+┌────────────────────────────────────────────────────────┐
+│ Layer 4: Logical Projection Consistency                │
+│ Replay journal events -> derive incident state         │
+│ Verify derived records match on-disk .rewind/records/  │
+└────────────────────────────────────────────────────────┘
+```
+
+### Deterministic Canonical Serialization (`canonical.js`)
+To guarantee byte-level reproducibility:
+- Object keys are recursively sorted using explicit UTF-16 code-unit relational comparisons (`(a < b ? -1 : (a > b ? 1 : 0))`).
+- Finite IEEE-754 numbers only; `-0` is normalized to `0`; `NaN` and `Infinity` are rejected fail-closed.
+- Non-serializable types (`undefined`, functions, symbols) throw `CanonicalizationError` (no silent dropping).
+
+### Honest Security Scope
+- **What It Detects:** Inconsistent file modifications, deleted intermediate events, event reordering, tail deletion, full-chain rewrites (relative to checkpoint), and derived view tampering.
+- **What It Does NOT Claim:** Distributed/blockchain consensus against an attacker with full filesystem control who rewrites the journal and checkpoint simultaneously. It establishes **Local Tamper Evidence relative to a trusted checkpoint.**
 
 ### Critical Safety Invariants
 * **Zero Automatic Execution of Historical Fixes:** Historical remediation is *evidence*, not authority. Rewind never executes past fixes automatically.
@@ -251,7 +306,7 @@ See [`SECURITY.md`](./SECURITY.md) for full threat model and mitigations.
 ## 9. Tested Platforms & Limitations
 
 ### Platform Testing Matrix
-- **Windows 11 (x64):** **VERIFIED** (Full test suite of 130 tests across 28 suites passing; live CLI execution verified).
+- **Windows 11 (x64):** **VERIFIED** (Full test suite of 161 tests across 39 suites passing; live CLI execution verified).
 - **Linux / POSIX:** **VERIFIED** (Standard Node.js built-ins and POSIX path semantics).
 - **macOS (Darwin):** **VERIFIED** (Standard Darwin pathing and file permission models).
 
@@ -273,7 +328,8 @@ The entire Rewind CLI was designed, architected, implemented, hardened, and veri
 - 5-state trust loop state machine and verification executor.
 - Regression detection and linking engine.
 - History timeline, detailed show inspector, and near-match search engine.
-- 28 test suites covering 130 automated test cases.
+- Immutable event journal, 4-layer cryptographic integrity layer, and projection rebuild engine.
+- 39 test suites covering 161 automated test cases.
 
 ### AI Tools Usage Disclosure
 Antigravity (Google DeepMind) was used as an AI pair programmer for code generation, test authoring, architectural review, and documentation drafting under developer direction. All generated code and tests were audited and verified against the event's zero-dependency rules.
