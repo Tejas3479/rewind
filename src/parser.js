@@ -131,7 +131,7 @@ export function parseArgs(rawArgs = []) {
       i++;
     } else if (arg === '--limit' || arg === '-n') {
       i++;
-      if (i >= rawArgs.length || rawArgs[i].startsWith('-')) {
+      if (i >= rawArgs.length || (rawArgs[i].startsWith('-') && !/^-\d+$/.test(rawArgs[i]))) {
         throw new InvalidArgumentError('Option "--limit" requires an integer value.');
       }
       const num = Number.parseInt(rawArgs[i], 10);

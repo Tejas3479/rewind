@@ -2,6 +2,7 @@ import { MissingArgumentError, CliError } from '../errors.js';
 import { formatJson, formatStatusBadge } from '../formatter.js';
 import { RecoveryStates } from '../storage/state.js';
 import { sanitizeForDisplay } from '../sanitizer.js';
+import { normalizeId } from '../storage/store.js';
 
 /**
  * Formats full UTC timestamp.
@@ -30,18 +31,19 @@ function formatUtc(isoString) {
  */
 export async function showCommand({ context }) {
   const { parsedArgs, storage, stdout, styler } = context;
-  const id = parsedArgs.positional[0];
+  const rawId = parsedArgs.positional[0];
 
-  if (!id) {
+  if (!rawId) {
     throw new MissingArgumentError('id', 'rewind show <id> [--json]');
   }
 
+  const id = normalizeId(rawId);
   const record = storage.getRecord(id);
   if (!record) {
-    throw new CliError(`Incident #${id} not found in ledger.`, {
+    throw new CliError(`Incident #${rawId} not found in ledger.`, {
       code: 'ERR_NOT_FOUND',
       exitCode: 1,
-      details: { id, suggestion: 'Run "rewind history" to browse all past incidents.' }
+      details: { id: rawId, suggestion: 'Run "rewind history" to browse all past incidents.' }
     });
   }
 
@@ -64,7 +66,7 @@ export async function showCommand({ context }) {
 
   // Section 1: Execution Details
   stdout.write(`${s.bold('EXECUTION:')}\n`);
-  stdout.write(`  ${s.dim('Command:')}      ${s.cyan(record.fullCommand || `${record.command} ${(record.args || []).join(' ')}`)}\n`);
+  stdout.write(`  ${s.dim('Command:')}      ${s.cyan(sanitizeForDisplay(record.fullCommand || `${record.command} ${(record.args || []).join(' ')}`))}\n`);
   stdout.write(`  ${s.dim('Exit Code:')}    ${record.exitCode !== null ? s.bold(String(record.exitCode)) : s.dim('null')}${record.signal ? ` (Signal: ${record.signal})` : ''}\n`);
   stdout.write(`  ${s.dim('Duration:')}     ${record.durationMs}ms\n`);
   stdout.write(`  ${s.dim('Started At:')}   ${formatUtc(record.startTime)}\n`);
@@ -74,9 +76,9 @@ export async function showCommand({ context }) {
   }
   stdout.write('\n');
 
-  // Section 2: Failure Memory & Fingerprint
-  stdout.write(`${s.bold('FAILURE MEMORY:')}\n`);
-  stdout.write(`  ${s.dim('Fingerprint:')}   ${s.cyan(record.fingerprint || 'none')}\n`);
+  // Section 2: Failure Signature & Fingerprint
+  stdout.write(`${s.bold('FAILURE SIGNATURE:')}\n`);
+  stdout.write(`  ${s.dim('Fingerprint:'.padEnd(14))} ${s.cyan(record.fingerprint || 'none')}\n`);
   if (record.normalizedError) {
     stdout.write(`  ${s.dim('Normalized Signature:')}\n`);
     const cleanNorm = sanitizeForDisplay(record.normalizedError);
@@ -103,11 +105,11 @@ export async function showCommand({ context }) {
   // Section 4: Environment & Repository Metadata
   stdout.write(`${s.bold('ENVIRONMENT & REPOSITORY:')}\n`);
   if (record.git && record.git.isGit) {
-    stdout.write(`  ${s.dim('Git Branch:')}   ${record.git.branch || s.dim('detached')} (${record.git.headCommit ? record.git.headCommit.slice(0, 10) : 'none'})\n`);
+    stdout.write(`  ${s.dim('Git Branch:'.padEnd(14))} ${record.git.branch || s.dim('detached')} (${record.git.headCommit ? record.git.headCommit.slice(0, 10) : 'none'})\n`);
   }
   if (record.environment) {
-    stdout.write(`  ${s.dim('Platform:')}     ${record.environment.platform} (${record.environment.arch}) / OS ${record.environment.osRelease}\n`);
-    stdout.write(`  ${s.dim('Runtime:')}      Node.js ${record.environment.nodeVersion}\n`);
+    stdout.write(`  ${s.dim('Platform:'.padEnd(14))} ${record.environment.platform} (${record.environment.arch}) / OS ${record.environment.osRelease}\n`);
+    stdout.write(`  ${s.dim('Runtime:'.padEnd(14))} Node.js ${record.environment.nodeVersion}\n`);
   }
   stdout.write('\n');
 
@@ -117,9 +119,9 @@ export async function showCommand({ context }) {
     for (let i = 0; i < record.recoveries.length; i++) {
       const rec = record.recoveries[i];
       stdout.write(`  ${s.bold(`[Attempt #${i + 1}]`)} ${s.dim(`(${formatUtc(rec.timestamp)})`)}\n`);
-      if (rec.cause) stdout.write(`    ${s.dim('Cause:')}   ${sanitizeForDisplay(rec.cause)}\n`);
-      if (rec.change) stdout.write(`    ${s.dim('Change:')}  ${sanitizeForDisplay(rec.change)}\n`);
-      if (rec.verifyCmd) stdout.write(`    ${s.dim('Verify:')}  ${s.cyan(sanitizeForDisplay(rec.verifyCmd))}\n`);
+      if (rec.cause) stdout.write(`    ${s.dim('Cause:'.padEnd(12))} ${sanitizeForDisplay(rec.cause)}\n`);
+      if (rec.change) stdout.write(`    ${s.dim('Change:'.padEnd(12))} ${sanitizeForDisplay(rec.change)}\n`);
+      if (rec.verifyCmd) stdout.write(`    ${s.dim('Verify:'.padEnd(12))} ${s.cyan(sanitizeForDisplay(rec.verifyCmd))}\n`);
     }
     stdout.write('\n');
   }
@@ -130,11 +132,14 @@ export async function showCommand({ context }) {
     const verStatus = record.status === RecoveryStates.VERIFIED
       ? s.green(s.bold('VERIFIED'))
       : s.red(s.bold('FAILED'));
-    stdout.write(`  ${s.dim('Status:')}       ${verStatus}\n`);
-    stdout.write(`  ${s.dim('Command:')}      ${s.cyan(sanitizeForDisplay(record.verification.command))}\n`);
-    stdout.write(`  ${s.dim('Exit Code:')}    ${record.verification.exitCode}\n`);
+    stdout.write(`  ${s.dim('Status:'.padEnd(14))} ${verStatus}\n`);
+    stdout.write(`  ${s.dim('Command:'.padEnd(14))} ${s.cyan(sanitizeForDisplay(record.verification.command))}\n`);
+    stdout.write(`  ${s.dim('Exit Code:'.padEnd(14))} ${record.verification.exitCode}\n`);
+    if (record.verification.durationMs !== undefined) {
+      stdout.write(`  ${s.dim('Duration:'.padEnd(14))} ${record.verification.durationMs}ms\n`);
+    }
     if (record.verification.verifiedAt) {
-      stdout.write(`  ${s.dim('Verified At:')}  ${formatUtc(record.verification.verifiedAt)}\n`);
+      stdout.write(`  ${s.dim('Verified At:'.padEnd(14))} ${formatUtc(record.verification.verifiedAt)}\n`);
     }
     stdout.write('\n');
   }

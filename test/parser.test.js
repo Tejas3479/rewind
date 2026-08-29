@@ -74,4 +74,20 @@ describe('Argument Parser (src/parser.js)', () => {
     assert.throws(() => parseArgs(['--unknown-flag']), InvalidArgumentError);
     assert.throws(() => parseArgs(['history', '--invalid']), InvalidArgumentError);
   });
+
+  test('parses and validates --limit and -n flags properly', () => {
+    const res1 = parseArgs(['history', '--limit', '5']);
+    assert.equal(res1.flags.limit, 5);
+
+    const res2 = parseArgs(['history', '-n', '10']);
+    assert.equal(res2.flags.limit, 10);
+
+    const res3 = parseArgs(['history', '--limit=20']);
+    assert.equal(res3.flags.limit, 20);
+
+    assert.throws(() => parseArgs(['history', '--limit']), InvalidArgumentError);
+    assert.throws(() => parseArgs(['history', '--limit', '-1']), InvalidArgumentError);
+    assert.throws(() => parseArgs(['history', '--limit', '0']), InvalidArgumentError);
+    assert.throws(() => parseArgs(['history', '--limit', 'abc']), InvalidArgumentError);
+  });
 });

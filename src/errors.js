@@ -59,7 +59,10 @@ export class UsageError extends CliError {
  */
 export class UnknownCommandError extends UsageError {
   constructor(command) {
-    super(`Unknown command: "${command}". Run "rewind --help" for available commands.`, { command });
+    super(`Unknown command: "${command}". Run "rewind --help" for available commands.`, {
+      command,
+      suggestion: 'Run "rewind --help" to see all available commands.'
+    });
     this.name = 'UnknownCommandError';
     this.code = 'ERR_UNKNOWN_COMMAND';
   }
@@ -70,7 +73,11 @@ export class UnknownCommandError extends UsageError {
  */
 export class MissingArgumentError extends UsageError {
   constructor(argName, commandUsage) {
-    super(`Missing required argument <${argName}>.${commandUsage ? ` Usage: ${commandUsage}` : ''}`, { argName, commandUsage });
+    super(`Missing required argument <${argName}>.${commandUsage ? ` Usage: ${commandUsage}` : ''}`, {
+      argName,
+      commandUsage,
+      suggestion: commandUsage ? `Usage: ${commandUsage}` : 'Run "rewind --help" for usage information.'
+    });
     this.name = 'MissingArgumentError';
     this.code = 'ERR_MISSING_ARGUMENT';
   }
@@ -81,7 +88,10 @@ export class MissingArgumentError extends UsageError {
  */
 export class InvalidArgumentError extends UsageError {
   constructor(message, details = {}) {
-    super(message, details);
+    super(message, {
+      ...details,
+      suggestion: details.suggestion || 'Run "rewind --help" for option syntax and examples.'
+    });
     this.name = 'InvalidArgumentError';
     this.code = 'ERR_INVALID_ARGUMENT';
   }

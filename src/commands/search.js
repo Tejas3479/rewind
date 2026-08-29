@@ -86,8 +86,8 @@ export async function searchCommand({ context }) {
     if (Array.isArray(rec.recoveries) && rec.recoveries.length > 0) {
       const last = rec.recoveries[rec.recoveries.length - 1];
       if (last.cause) stdout.write(`  ${s.dim('Suspected Cause:'.padEnd(18))} ${sanitizeForDisplay(last.cause)}\n`);
-      if (last.change) stdout.write(`  ${s.dim('Historical Fix:'.padEnd(18))}  ${sanitizeForDisplay(last.change)}\n`);
-      if (last.verifyCmd) stdout.write(`  ${s.dim('Verify Command:'.padEnd(18))}  ${s.cyan(sanitizeForDisplay(last.verifyCmd))}\n`);
+      if (last.change) stdout.write(`  ${s.dim('Historical Fix:'.padEnd(18))} ${sanitizeForDisplay(last.change)}\n`);
+      if (last.verifyCmd) stdout.write(`  ${s.dim('Verify Command:'.padEnd(18))} ${s.cyan(sanitizeForDisplay(last.verifyCmd))}\n`);
     }
 
     if (rec.status === RecoveryStates.VERIFIED && rec.verification) {

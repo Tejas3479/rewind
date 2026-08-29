@@ -2,6 +2,7 @@ import { MissingArgumentError, CliError, UsageError } from '../errors.js';
 import { RecoveryStates, assertValidTransition } from '../storage/state.js';
 import { formatJson, formatStatusBadge } from '../formatter.js';
 import { sanitizeForDisplay } from '../sanitizer.js';
+import { normalizeId } from '../storage/store.js';
 
 /**
  * Handler for `rewind recover <id> [options]`.
@@ -14,18 +15,19 @@ import { sanitizeForDisplay } from '../sanitizer.js';
  */
 export async function recoverCommand({ context }) {
   const { parsedArgs, storage, stdout, styler } = context;
-  const id = parsedArgs.positional[0];
+  const rawId = parsedArgs.positional[0];
 
-  if (!id) {
+  if (!rawId) {
     throw new MissingArgumentError('id', 'rewind recover <id> [--cause "..."] [--change "..."] [--verify-cmd "..."]');
   }
 
+  const id = normalizeId(rawId);
   const record = storage.getRecord(id);
   if (!record) {
-    throw new CliError(`Incident #${id} not found in ledger.`, {
+    throw new CliError(`Incident #${rawId} not found in ledger.`, {
       code: 'ERR_NOT_FOUND',
       exitCode: 1,
-      details: { id, suggestion: 'Run "rewind history" to browse all past incidents.' }
+      details: { id: rawId, suggestion: 'Run "rewind history" to browse all past incidents.' }
     });
   }
 
@@ -76,14 +78,17 @@ export async function recoverCommand({ context }) {
   }
 
   const s = styler;
-  const divider = s.dim('─'.repeat(60));
+  const termWidth = (stdout && typeof stdout.columns === 'number' && stdout.columns > 20)
+    ? Math.min(stdout.columns, 80)
+    : 64;
+  const divider = s.dim('─'.repeat(termWidth));
 
   stdout.write(`\n${s.bold('RECOVERY RECORDED')}  ${s.dim(`[Incident #${id}]`)}\n`);
   stdout.write(`${divider}\n`);
   stdout.write(`  ${s.dim('New State:'.padEnd(18))} ${formatStatusBadge(targetState, s)}\n`);
   if (cause) stdout.write(`  ${s.dim('Suspected Cause:'.padEnd(18))} ${sanitizeForDisplay(cause)}\n`);
-  if (change) stdout.write(`  ${s.dim('Attempted Fix:'.padEnd(18))}   ${sanitizeForDisplay(change)}\n`);
-  if (verifyCmd) stdout.write(`  ${s.dim('Verify Command:'.padEnd(18))}  ${s.cyan(sanitizeForDisplay(verifyCmd))}\n`);
+  if (change) stdout.write(`  ${s.dim('Attempted Fix:'.padEnd(18))} ${sanitizeForDisplay(change)}\n`);
+  if (verifyCmd) stdout.write(`  ${s.dim('Verify Command:'.padEnd(18))} ${s.cyan(sanitizeForDisplay(verifyCmd))}\n`);
   stdout.write(`${divider}\n`);
 
   if (targetState === RecoveryStates.FIXED && verifyCmd) {

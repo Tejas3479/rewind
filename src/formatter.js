@@ -1,3 +1,5 @@
+import { stripAnsi } from './sanitizer.js';
+
 /**
  * Formatter handles terminal color styling, TTY detection, NO_COLOR compliance,
  * relative time formatting, semantic status badges, and JSON serialization.
@@ -21,6 +23,17 @@ const ANSI_CODES = {
   white: '\x1b[37m',
   gray: '\x1b[90m'
 };
+
+/**
+ * Returns the visible character length of a string by stripping ANSI escape sequences.
+ *
+ * @param {string} str
+ * @returns {number}
+ */
+export function visibleLength(str) {
+  if (!str) return 0;
+  return stripAnsi(String(str)).length;
+}
 
 /**
  * Checks if color output should be enabled for a given stream and environment.
@@ -81,6 +94,8 @@ export function createStyler(enabled) {
     cyan: (text) => style(ANSI_CODES.cyan, text),
     white: (text) => style(ANSI_CODES.white, text),
     gray: (text) => style(ANSI_CODES.gray, text),
+    stripAnsi: (text) => stripAnsi(text),
+    visibleLength: (text) => visibleLength(text),
     badge: (label, colorFn) => {
       const fn = colorFn || ((t) => style(ANSI_CODES.bold, t));
       return fn(`[${label}]`);
@@ -151,16 +166,29 @@ export function formatStatusBadge(status, styler) {
 
 /**
  * Formats a clean boxed notification for major state milestones (verification, regressions).
+ * Uses visible length calculation to ensure borders remain aligned even with ANSI escape sequences.
  *
  * @param {string} title
  * @param {Array<{ label: string, value: string }>} fields
  * @param {ReturnType<createStyler>} styler
  * @param {'success'|'error'|'warning'|'info'} [tone='info']
+ * @param {object} [options]
+ * @param {number} [options.width=64]
  * @returns {string}
  */
-export function formatBox(title, fields, styler, tone = 'info') {
+export function formatBox(title, fields, styler, tone = 'info', options = {}) {
   const s = styler;
-  const width = 64;
+  const targetWidth = options.width || 64;
+
+  let maxContentWidth = visibleLength(title) + 4;
+  for (const field of fields) {
+    const rawLabel = `${field.label}:`;
+    const labelWidth = Math.max(22, rawLabel.length + 2);
+    const valWidth = visibleLength(field.value);
+    maxContentWidth = Math.max(maxContentWidth, labelWidth + valWidth + 4);
+  }
+
+  const width = Math.max(targetWidth, maxContentWidth);
 
   const topBorder = `┌${'─'.repeat(width - 2)}┐`;
   const bottomBorder = `└${'─'.repeat(width - 2)}┘`;
@@ -171,9 +199,11 @@ export function formatBox(title, fields, styler, tone = 'info') {
       ? s.red(s.bold(title))
       : s.bold(title);
 
+  const titlePadding = Math.max(0, width - 4 - visibleLength(title));
+
   const lines = [
     topBorder,
-    `│ ${coloredTitle}${' '.repeat(Math.max(0, width - 4 - title.length))} │`,
+    `│ ${coloredTitle}${' '.repeat(titlePadding)} │`,
     `│${' '.repeat(width - 2)}│`
   ];
 
@@ -181,8 +211,8 @@ export function formatBox(title, fields, styler, tone = 'info') {
     const rawLabel = `${field.label}:`;
     const labelStr = s.dim(rawLabel.padEnd(22));
     const valStr = field.value;
-    const contentLen = rawLabel.padEnd(22).length + 1 + valStr.length;
-    const padding = Math.max(0, width - 4 - contentLen);
+    const contentVisLen = 22 + 1 + visibleLength(valStr);
+    const padding = Math.max(0, width - 4 - contentVisLen);
 
     lines.push(`│ ${labelStr} ${valStr}${' '.repeat(padding)} │`);
   }
@@ -212,5 +242,14 @@ export function formatError(err, styler) {
   const s = styler;
   const prefix = s.red(s.bold('error:'));
   const message = err instanceof Error ? err.message : String(err);
-  return `${prefix} ${message}`;
+  let formatted = `${prefix} ${message}`;
+
+  if (err && typeof err === 'object' && err.details) {
+    const details = err.details;
+    if (details.suggestion) {
+      formatted += `\n  ${s.dim('hint:')} ${details.suggestion}`;
+    }
+  }
+
+  return formatted;
 }

@@ -54,13 +54,13 @@ export async function runCommand({ context }) {
         if (lastRecovery) {
           stderr.write(`${s.bold('Historical Recovery:')}\n`);
           if (lastRecovery.cause) stderr.write(`  ${s.dim('Suspected Cause:'.padEnd(18))} ${sanitizeForDisplay(lastRecovery.cause)}\n`);
-          if (lastRecovery.change) stderr.write(`  ${s.dim('Verified Fix:'.padEnd(18))}    ${sanitizeForDisplay(lastRecovery.change)}\n`);
-          if (lastRecovery.verifyCmd) stderr.write(`  ${s.dim('Verify Command:'.padEnd(18))}  ${s.cyan(sanitizeForDisplay(lastRecovery.verifyCmd))}\n`);
+          if (lastRecovery.change) stderr.write(`  ${s.dim('Verified Fix:'.padEnd(18))} ${sanitizeForDisplay(lastRecovery.change)}\n`);
+          if (lastRecovery.verifyCmd) stderr.write(`  ${s.dim('Verify Command:'.padEnd(18))} ${s.cyan(sanitizeForDisplay(lastRecovery.verifyCmd))}\n`);
           stderr.write('\n');
         }
 
         stderr.write(`Recorded new occurrence as Incident ${idText} (Status: ${s.red('REGRESSED')}). Run "${s.cyan(`rewind show ${savedRecord.id}`)}".\n`);
-        stderr.write(`${s.dim('Note: Historical recovery is evidence, not an automatic fix.')}\n\n`);
+        stderr.write(`${s.dim('Important: Historical recovery is evidence, not an automatic fix. Rewind never automatically replays past commands.')}\n\n`);
       } else {
         const tag = s.badge('rewind', s.yellow);
         stderr.write(`\n${tag} Recorded failure as incident ${idText}. Run "${s.cyan(`rewind show ${savedRecord.id}`)}" to inspect.\n\n`);

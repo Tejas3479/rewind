@@ -4,6 +4,7 @@ import { executeAndCapture } from '../capture.js';
 import { tokenizeCommandLine } from '../parser.js';
 import { formatJson, formatBox } from '../formatter.js';
 import { sanitizeForDisplay } from '../sanitizer.js';
+import { normalizeId } from '../storage/store.js';
 
 /**
  * Handler for `rewind verify <id>`.
@@ -16,18 +17,19 @@ import { sanitizeForDisplay } from '../sanitizer.js';
  */
 export async function verifyCommand({ context }) {
   const { parsedArgs, config, storage, env, stdout, stderr, styler } = context;
-  const id = parsedArgs.positional[0];
+  const rawId = parsedArgs.positional[0];
 
-  if (!id) {
+  if (!rawId) {
     throw new MissingArgumentError('id', 'rewind verify <id>');
   }
 
+  const id = normalizeId(rawId);
   const record = storage.getRecord(id);
   if (!record) {
-    throw new CliError(`Incident #${id} not found in ledger.`, {
+    throw new CliError(`Incident #${rawId} not found in ledger.`, {
       code: 'ERR_NOT_FOUND',
       exitCode: 1,
-      details: { id, suggestion: 'Run "rewind history" to browse all past incidents.' }
+      details: { id: rawId, suggestion: 'Run "rewind history" to browse all past incidents.' }
     });
   }
 
@@ -106,6 +108,7 @@ export async function verifyCommand({ context }) {
       { label: 'Incident', value: `#${id}` },
       { label: 'Verify Command', value: verifyCmd },
       { label: 'Exit Code', value: '0 (Success)' },
+      { label: 'Duration', value: `${verifyResult.durationMs}ms` },
       { label: 'Verified At', value: verifiedAtIso }
     ], styler, 'success');
 
@@ -142,7 +145,8 @@ export async function verifyCommand({ context }) {
     const box = formatBox('✗ VERIFICATION FAILED', [
       { label: 'Incident', value: `#${id}` },
       { label: 'Verify Command', value: verifyCmd },
-      { label: 'Exit Code', value: String(verifyResult.exitCode ?? 1) }
+      { label: 'Exit Code', value: String(verifyResult.exitCode ?? 1) },
+      { label: 'Duration', value: `${verifyResult.durationMs}ms` }
     ], styler, 'error');
 
     stderr.write(`\n${box}\n\n`);

@@ -6,6 +6,17 @@ import { RecoveryStates } from './state.js';
 import { computeFingerprint } from './fingerprint.js';
 import { CliError } from '../errors.js';
 
+/**
+ * Normalizes an incident ID string by stripping common prefixes like "#", "RW-", or "rw-".
+ *
+ * @param {string|number} id
+ * @returns {string}
+ */
+export function normalizeId(id) {
+  if (id === null || id === undefined) return '';
+  return String(id).replace(/^(?:RW-|#)/i, '').trim();
+}
+
 export class StorageEngine {
   /**
    * @param {string} ledgerDir - Path to .rewind directory
@@ -283,14 +294,22 @@ export class StorageEngine {
       this.init();
     }
 
-    const strId = String(id).trim();
+    const strId = normalizeId(id);
     if (!/^\d+$/.test(strId)) {
-      throw new CliError(`Invalid incident ID format: "${strId}". Incident IDs must be positive integers.`, { code: 'ERR_INVALID_ID', exitCode: 1 });
+      throw new CliError(`Invalid incident ID format: "${id}". Incident IDs must be positive integers.`, {
+        code: 'ERR_INVALID_ID',
+        exitCode: 1,
+        details: { suggestion: 'Run "rewind history" to browse all past incidents.' }
+      });
     }
 
     const existing = this.getRecord(strId);
     if (!existing) {
-      throw new CliError(`Incident #${strId} not found in ledger.`, { code: 'ERR_NOT_FOUND', exitCode: 1 });
+      throw new CliError(`Incident #${strId} not found in ledger.`, {
+        code: 'ERR_NOT_FOUND',
+        exitCode: 1,
+        details: { id: strId, suggestion: 'Run "rewind history" to browse all past incidents.' }
+      });
     }
 
     const updated = updaterFn(existing);
@@ -334,7 +353,7 @@ export class StorageEngine {
     if (!this.initialized) {
       this.init();
     }
-    const strId = String(id).trim();
+    const strId = normalizeId(id);
     if (!/^\d+$/.test(strId)) {
       return null;
     }

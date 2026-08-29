@@ -1,5 +1,6 @@
-import { formatJson, formatRelativeTime, formatStatusBadge } from '../formatter.js';
+import { formatJson, formatRelativeTime, formatStatusBadge, visibleLength } from '../formatter.js';
 import { RecoveryStates } from '../storage/state.js';
+import { sanitizeForDisplay } from '../sanitizer.js';
 
 /**
  * Derives a concise result summary for an incident row.
@@ -69,16 +70,18 @@ export async function historyCommand({ context }) {
     ? stdout.columns
     : 80;
 
-  // Fixed column widths
+  // Responsive column widths
+  const isNarrow = termWidth < 70;
   const colIdWidth = 6;
-  const colStatusWidth = 12;
-  const colTimeWidth = 11;
-  const colResultWidth = 14;
-  const spacing = 4 * 2; // 4 gutters of 2 spaces
-  const fixedWidth = colIdWidth + colStatusWidth + colTimeWidth + colResultWidth + spacing;
-  const colCmdWidth = Math.max(20, Math.min(60, termWidth - fixedWidth));
+  const colStatusWidth = isNarrow ? 11 : 12;
+  const colTimeWidth = isNarrow ? 9 : 11;
+  const colResultWidth = isNarrow ? 12 : 14;
+  const gutter = '  ';
+  const fixedWidth = colIdWidth + colStatusWidth + colTimeWidth + colResultWidth + (4 * gutter.length);
+  const colCmdWidth = Math.max(16, Math.min(50, termWidth - fixedWidth));
 
-  const dividerLen = Math.min(termWidth, fixedWidth + colCmdWidth);
+  const totalLineWidth = colIdWidth + colStatusWidth + colCmdWidth + colTimeWidth + colResultWidth + (4 * gutter.length);
+  const dividerLen = Math.min(termWidth, Math.max(50, totalLineWidth));
   const divider = s.dim('─'.repeat(dividerLen));
 
   stdout.write(`\n${s.bold('REWIND RECOVERY LEDGER')} ${s.dim(`(${allRecords.length} total incidents)`)}\n`);
@@ -91,22 +94,23 @@ export async function historyCommand({ context }) {
   const hTime = 'TIME'.padEnd(colTimeWidth);
   const hResult = 'RESULT';
 
-  stdout.write(`${s.dim(hId)}  ${s.dim(hStatus)}  ${s.dim(hCmd)}  ${s.dim(hTime)}  ${s.dim(hResult)}\n`);
+  stdout.write(`${s.dim(hId)}${gutter}${s.dim(hStatus)}${gutter}${s.dim(hCmd)}${gutter}${s.dim(hTime)}${gutter}${s.dim(hResult)}\n`);
   stdout.write(`${divider}\n`);
 
   for (const rec of records) {
     const idText = `#${rec.id}`.padEnd(colIdWidth);
-    const rawCmd = rec.fullCommand || `${rec.command} ${(rec.args || []).join(' ')}`.trim();
+    const rawCmd = sanitizeForDisplay(rec.fullCommand || `${rec.command} ${(rec.args || []).join(' ')}`.trim());
     const cmdTruncated = rawCmd.length > colCmdWidth
       ? rawCmd.slice(0, colCmdWidth - 3) + '...'
       : rawCmd.padEnd(colCmdWidth);
 
     const relTime = formatRelativeTime(rec.startTime).padEnd(colTimeWidth);
     const badge = formatStatusBadge(rec.status, s);
-    const statusPadding = ' '.repeat(Math.max(0, colStatusWidth - rec.status.length));
+    const badgeVisLen = visibleLength(badge);
+    const statusPadding = ' '.repeat(Math.max(0, colStatusWidth - badgeVisLen));
     const resultSummary = getResultSummary(rec, s);
 
-    stdout.write(`${s.bold(idText)}  ${badge}${statusPadding}  ${cmdTruncated}  ${s.dim(relTime)}  ${resultSummary}\n`);
+    stdout.write(`${s.bold(idText)}${gutter}${badge}${statusPadding}${gutter}${cmdTruncated}${gutter}${s.dim(relTime)}${gutter}${resultSummary}\n`);
   }
 
   stdout.write(`${divider}\n`);
