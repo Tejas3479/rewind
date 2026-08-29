@@ -261,8 +261,15 @@ export function buildAgentContext(ledgerDir, targetIdOrLatest = 'latest', option
   if (conflictReport.hasConflict) {
     unprovenAssumptions.push(`Conflicting historical verification outcomes detected across incidents: ${conflictReport.conflictingIncidents.join(', ')}`);
   }
+  const warnings = [];
   if (!isLedgerTrusted) {
-    unprovenAssumptions.push('Ledger integrity verification failed. Historical records cannot be guaranteed authentic.');
+    warnings.push('Ledger integrity verification failed. Historical records cannot be guaranteed authentic.');
+  }
+  if (stalenessReport.isStale) {
+    warnings.push(`Environment delta detected since recorded state: ${stalenessReport.reasons.join(', ')}`);
+  }
+  if (conflictReport.hasConflict) {
+    warnings.push(`Conflicting historical verification outcomes detected across incidents: ${conflictReport.conflictingIncidents.join(', ')}`);
   }
 
   const suggestedActions = [];
@@ -275,6 +282,8 @@ export function buildAgentContext(ledgerDir, targetIdOrLatest = 'latest', option
   suggestedActions.push('FORMULATE_NEW_HYPOTHESIS');
   suggestedActions.push('PROPOSE_RECOVERY');
   suggestedActions.push('REQUEST_VERIFICATION');
+
+  const recommendedAction = suggestedActions[0] || 'INVESTIGATE';
 
   return {
     status: 'success',
@@ -341,7 +350,10 @@ export function buildAgentContext(ledgerDir, targetIdOrLatest = 'latest', option
       },
       unprovenAssumptions
     },
+    warnings,
+    recommendedAction,
     suggestedActions,
+    allowedNextActions: suggestedActions,
     safety: {
       readOnly: true,
       mayAutoExecuteCommands: false,

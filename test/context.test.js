@@ -91,6 +91,9 @@ describe('Agent-Consumption Interface (src/storage/context.js & rewind context)'
       assert.strictEqual(context.observedEvidence.failure.command, 'npm');
       assert.strictEqual(context.ledgerTrust.isTrusted, true);
       assert.strictEqual(context.safety.mayAutoExecuteCommands, false);
+      assert.ok(Array.isArray(context.warnings));
+      assert.strictEqual(typeof context.recommendedAction, 'string');
+      assert.ok(Array.isArray(context.allowedNextActions));
     });
 
     it('resolves explicit incident ID accurately and throws for non-existent ID', () => {

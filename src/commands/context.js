@@ -14,7 +14,8 @@ export async function contextCommand({ context }) {
   const s = styler;
 
   const target = parsedArgs.positional[0] || 'latest';
-  const agentContext = storage.getAgentContext(target);
+  const limit = typeof parsedArgs.flags.limit === 'number' && parsedArgs.flags.limit > 0 ? parsedArgs.flags.limit : undefined;
+  const agentContext = storage.getAgentContext(target, { maxMatches: limit });
 
   if (parsedArgs.flags.json) {
     stdout.write(formatJson(agentContext) + '\n');

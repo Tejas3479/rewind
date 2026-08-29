@@ -1,6 +1,6 @@
 # REWIND Agent-Consumption Interface Specification
 
-> **Version:** `1.0.0`  
+> **Version:** `1.1.0`  
 > **Status:** Standard Machine Interface  
 > **Runtime Dependencies:** `0` (Zero external packages, zero AI APIs, zero remote services)
 
@@ -15,7 +15,7 @@ The **Agent-Consumption Interface** allows autonomous and interactive coding age
 ### Core Guarantees for Consuming Agents:
 1. **Deterministic JSON Contract**: Stable field names, predictable array structures, and typed schemas.
 2. **Pure Output Hygiene**: When invoked with `--json`, Rewind writes **100% parseable JSON** to `stdout` with zero banner text, zero interactive prompts, and zero ANSI escape sequences.
-3. **Strict Non-Auto-Execution Policy**: Historical verification commands and past fixes are explicitly labeled as **`HISTORICAL_RECOVERY`** with `action: "REVIEW"`. Consuming agents are forbidden from automatically executing historical commands.
+3. **Strict Non-Auto-Execution Policy**: Historical verification commands and past fixes are explicitly labeled as **`HISTORICAL_RECOVERY`** with `action: "REVIEW"` and `mayAutoExecute: false`. Consuming agents are forbidden from automatically replaying historical commands.
 4. **Authoritative Ledger Trust Verification**: Context includes a cryptographic audit report of the local event journal (`.rewind/journal.jsonl`). If tampering or corruption is detected, historical claims are downgraded to `UNTRUSTED_EVIDENCE`.
 5. **Secret Redaction**: API keys (OpenAI, AWS, GitHub PATs, Slack, private keys, bearer tokens) are scrubbed before payload assembly.
 
@@ -30,6 +30,7 @@ The **Agent-Consumption Interface** allows autonomous and interactive coding age
 | `rewind history --json` | `stdout` | Full timeline of recorded incidents and their current verification states |
 | `rewind show <id> --json` | `stdout` | Complete uncurated forensic snapshot of a single incident |
 | `rewind search <query> --json` | `stdout` | Deterministic keyword and near-match similarity search across historical incidents |
+| `rewind doctor --json` | `stdout` | Complete 15-check ledger health, storage consistency, and diagnostics report |
 | `rewind patterns --json` | `stdout` | Empirical failure family patterns (flakiness, regressions, environment skews) |
 | `rewind verify-integrity --json` | `stdout` | Read-only 4-layer cryptographic ledger integrity audit |
 
@@ -42,7 +43,7 @@ The **Agent-Consumption Interface** allows autonomous and interactive coding age
 ```json
 {
   "status": "success",
-  "contextSchemaVersion": "1.0.0",
+  "contextSchemaVersion": "1.1.0",
   "sourceJournalFormat": 1,
   "query": {
     "target": "latest",
@@ -193,7 +194,15 @@ The **Agent-Consumption Interface** allows autonomous and interactive coding age
       "No environment delta detected between recorded verification and current runtime."
     ]
   },
+  "warnings": [],
+  "recommendedAction": "REVIEW_HISTORICAL_EVIDENCE",
   "suggestedActions": [
+    "REVIEW_HISTORICAL_EVIDENCE",
+    "FORMULATE_NEW_HYPOTHESIS",
+    "PROPOSE_RECOVERY",
+    "REQUEST_VERIFICATION"
+  ],
+  "allowedNextActions": [
     "REVIEW_HISTORICAL_EVIDENCE",
     "FORMULATE_NEW_HYPOTHESIS",
     "PROPOSE_RECOVERY",
@@ -230,28 +239,56 @@ If `currentApplicability.isStale === true`, the current environment differs from
 
 ---
 
-## 5. Generic Integration Patterns for Coding Agents
+## 5. Agent Integration Recipes
 
-Any AI tool or automation agent with terminal execution capabilities can integrate with Rewind.
+### A. Claude Code Configuration (`CLAUDE.md`)
 
-### Generic Workflow Recipe
+Add the following instructions to your project's `CLAUDE.md`:
+
+```markdown
+# Rewind Integration Instructions for Claude Code
+
+When running builds or test suites:
+1. Always execute commands wrapped with Rewind:
+   `rewind run <command...>`
+2. If the command fails, query historical context:
+   `rewind context latest --json`
+3. Inspect `observedEvidence.remedies.verified` for prior proven fixes.
+4. Avoid any approach listed in `observedEvidence.remedies.failedApproaches`.
+5. When proposing code edits, record your recovery hypothesis:
+   `rewind recover <id> --cause "<cause>" --change "<change>" --verify-cmd "<test cmd>"`
+6. Ask the human user to verify the fix:
+   `rewind verify <id>`
+```
+
+---
+
+### B. Cursor Rules (`.cursorrules`)
+
+Add the following rule to your repository root:
+
+```markdown
+# Rewind Terminal Verification Rules
+- When a terminal command fails, execute `rewind context latest --json` to inspect historical failure evidence.
+- NEVER automatically replay historical recovery commands as executable scripts.
+- Check negative memory in `observedEvidence.remedies.failedApproaches` before formulating new fixes.
+- Once a fix is applied, guide the user to run `rewind verify <id>`.
+```
+
+---
+
+### C. Gemini CLI & Terminal Agent Loop
 
 ```bash
-# Step 1: Execute test/build command wrapped by Rewind
+# 1. Execute wrapped process
 rewind run npm test
 
-# Step 2: If the command fails (non-zero exit), fetch agent context in JSON
+# 2. If non-zero exit, fetch agent context
 rewind context latest --json
 
-# Step 3: Parse JSON in your agent loop
-# - Inspect observedEvidence.failure.stderrSnippet
-# - Check observedEvidence.remedies.verified
-# - Avoid observedEvidence.remedies.failedApproaches
-# - Propose code changes to user
+# 3. Formulate fix and record hypothesis
+rewind recover 14 --cause "Postgres port mismatch" --change "Updated port in .env" --verify-cmd "npm test"
 
-# Step 4: Record newly proposed recovery
-rewind recover 14 --cause "..." --change "..." --verify-cmd "npm test"
-
-# Step 5: Ask human to run verification
+# 4. Seal verification
 rewind verify 14
 ```
