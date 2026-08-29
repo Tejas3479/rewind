@@ -1,0 +1,26 @@
+{
+  "name": "rewind",
+  "version": "0.1.0",
+  "description": "Remember what fixed it. A verified-recovery ledger for the terminal.",
+  "type": "module",
+  "main": "src/index.js",
+  "bin": {
+    "rewind": "./bin/rewind.js"
+  },
+  "scripts": {
+    "test": "node --test",
+    "check": "node --check bin/rewind.js"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "keywords": [
+    "cli",
+    "terminal",
+    "recovery",
+    "ledger",
+    "zero-dependency"
+  ],
+  "author": "",
+  "license": "MIT"
+}
