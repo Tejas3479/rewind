@@ -58,14 +58,16 @@ const COMMAND_DOCS = {
       { name: '<id>', description: 'Incident ID to recover' }
     ],
     options: [
-      { flag: '--cause <text>', description: 'Suspected root cause' },
-      { flag: '--change <text>', description: 'Remediation action taken' },
+      { flag: '--cause <text>', description: 'Suspected root cause (Provenance: USER_REPORTED)' },
+      { flag: '--change <text>', description: 'Remediation action taken (Provenance: USER_REPORTED)' },
       { flag: '--verify-cmd <cmd>', description: 'Explicit verification command' },
+      { flag: '--fixed', description: 'Mark remediation as applied by user (Status: FIXED, Quality: UNVERIFIED)' },
       { flag: '--no-color', description: 'Disable ANSI color formatting' },
       { flag: '--root <path>', description: 'Explicit project root / ledger directory' }
     ],
     examples: [
-      'rewind recover 1 --cause "Bad config" --change "Updated port" --verify-cmd "npm test"'
+      'rewind recover 1 --cause "Bad config" --change "Updated port" --verify-cmd "npm test"',
+      'rewind recover 1 --change "Patched connection pool size" --fixed --verify-cmd "npm test"'
     ]
   },
   verify: {

@@ -197,8 +197,12 @@ export function buildAgentContext(ledgerDir, targetIdOrLatest = 'latest', option
             type: 'HISTORICAL_RECOVERY',
             status: isLedgerTrusted ? 'VERIFIED' : 'UNTRUSTED_EVIDENCE',
             trustLevel: isLedgerTrusted ? 'VERIFIED_IN_LEDGER' : 'UNTRUSTED_INTEGRITY_VIOLATION',
+            evidenceQuality: attempt.evidenceQuality || 'DIRECT',
             cause: attempt.cause || 'Unspecified cause',
+            causeProvenance: attempt.causeProvenance || 'USER_REPORTED',
             change: attempt.change || 'Unspecified change',
+            changeProvenance: attempt.changeProvenance || 'USER_REPORTED',
+            observedChanges: attempt.observedChanges || null,
             verificationCommand: {
               command: attempt.verifyCmd || '',
               role: 'VERIFICATION_ONLY',
@@ -207,6 +211,7 @@ export function buildAgentContext(ledgerDir, targetIdOrLatest = 'latest', option
             provenance,
             historicalVerification: {
               status: 'VERIFIED',
+              provenance: 'DIRECTLY_VERIFIED',
               verifiedAt: lastRun?.timestamp || r.updatedAt,
               runsCount: verificationRuns.length,
               lastRunResult: {
@@ -228,9 +233,13 @@ export function buildAgentContext(ledgerDir, targetIdOrLatest = 'latest', option
           negativeMemory.push({
             type: 'FAILED_APPROACH',
             status: 'FAILED',
+            evidenceQuality: 'DIRECT',
             cause: attempt.cause || 'Unspecified cause',
+            causeProvenance: attempt.causeProvenance || 'USER_REPORTED',
             change: attempt.change || 'Unspecified change',
+            changeProvenance: attempt.changeProvenance || 'USER_REPORTED',
             verifyCmd: attempt.verifyCmd || null,
+            verificationProvenance: 'DIRECTLY_VERIFIED',
             provenance,
             warning: 'This remediation hypothesis failed verification under recorded conditions.'
           });

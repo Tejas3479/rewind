@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { computeFingerprint } from './fingerprint.js';
-import { IncidentStatus, RecoveryAttemptStatus } from './state.js';
+import { IncidentStatus, RecoveryAttemptStatus, ProvenanceType, EvidenceQuality } from './state.js';
 import { parseDiagnostic } from '../diagnostics/index.js';
 
 const MAX_OUTPUT_HEAD = 64 * 1024; // 64 KB
@@ -198,7 +198,8 @@ export function normalizeRecordToCurrentSchema(record) {
             output: copy.verification.output || '',
             outputHash: crypto.createHash('sha256').update(copy.verification.output || '', 'utf8').digest('hex'),
             environmentFingerprint: copy.environment?.fingerprint || '',
-            result: runPassed ? 'PASSED' : 'FAILED'
+            result: runPassed ? 'PASSED' : 'FAILED',
+            provenance: ProvenanceType.DIRECTLY_VERIFIED
           });
         }
 
@@ -206,14 +207,51 @@ export function normalizeRecordToCurrentSchema(record) {
           id: i + 1,
           createdAt: legacy.timestamp || copy.startTime,
           cause: legacy.cause || null,
+          causeProvenance: legacy.cause ? ProvenanceType.USER_REPORTED : null,
           change: legacy.change || null,
+          changeProvenance: legacy.change ? ProvenanceType.USER_REPORTED : null,
           verifyCmd: legacy.verifyCmd || null,
+          verifyCmdProvenance: legacy.verifyCmd ? ProvenanceType.USER_REPORTED : null,
+          observedChanges: null,
           status: attemptStatus,
+          evidenceQuality: attemptStatus === RecoveryAttemptStatus.VERIFIED ? EvidenceQuality.DIRECT : EvidenceQuality.USER_REPORTED,
           verificationRuns: runs
         });
       }
     }
   }
+
+  // Normalize provenance and evidence quality on all attempts
+  copy.recoveryAttempts = copy.recoveryAttempts.map((attempt) => {
+    const runs = (Array.isArray(attempt.verificationRuns) ? attempt.verificationRuns : []).map((r) => ({
+      ...r,
+      provenance: r.provenance || ProvenanceType.DIRECTLY_VERIFIED
+    }));
+
+    let quality = attempt.evidenceQuality;
+    if (!quality) {
+      if (attempt.status === RecoveryAttemptStatus.VERIFIED) {
+        quality = EvidenceQuality.DIRECT;
+      } else if (attempt.status === RecoveryAttemptStatus.FIXED || attempt.status === RecoveryAttemptStatus.PROPOSED) {
+        quality = EvidenceQuality.UNVERIFIED;
+      } else if (attempt.change || attempt.cause) {
+        quality = EvidenceQuality.USER_REPORTED;
+      } else {
+        quality = EvidenceQuality.UNVERIFIED;
+      }
+    }
+
+    return {
+      ...attempt,
+      causeProvenance: attempt.causeProvenance || (attempt.cause ? ProvenanceType.USER_REPORTED : null),
+      changeProvenance: attempt.changeProvenance || (attempt.change ? ProvenanceType.USER_REPORTED : null),
+      verifyCmdProvenance: attempt.verifyCmdProvenance || (attempt.verifyCmd ? ProvenanceType.USER_REPORTED : null),
+      observedChanges: attempt.observedChanges || null,
+      status: attempt.status || RecoveryAttemptStatus.PROPOSED,
+      evidenceQuality: quality,
+      verificationRuns: runs
+    };
+  });
 
   // Normalize legacy status string
   if (copy.status === 'FIXED' || copy.status === 'SUSPECTED') {

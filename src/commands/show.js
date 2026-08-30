@@ -162,17 +162,29 @@ export async function showCommand({ context }) {
     stdout.write(`${s.bold(`RECOVERY ATTEMPTS (${attempts.length} recorded):`)}\n`);
     for (const att of attempts) {
       const attBadge = formatStatusBadge(att.status, s);
-      stdout.write(`  ${s.bold(`[Attempt #${att.id}]`)} ${attBadge} ${s.dim(`(${formatUtc(att.createdAt)})`)}\n`);
-      if (att.cause) stdout.write(`    ${s.dim('Hypothesis:'.padEnd(16))} ${sanitizeForDisplay(att.cause)}\n`);
-      if (att.change) stdout.write(`    ${s.dim('Attempted Fix:'.padEnd(16))} ${sanitizeForDisplay(att.change)}\n`);
-      if (att.verifyCmd) stdout.write(`    ${s.dim('Verify Command:'.padEnd(16))} ${s.cyan(sanitizeForDisplay(att.verifyCmd))}\n`);
+      const qualityTag = att.evidenceQuality ? s.dim(`[Quality: ${att.evidenceQuality}]`) : '';
+      const fixedTag = att.status === 'FIXED' ? s.yellow(' (User Claim — Unverified)') : '';
+      stdout.write(`  ${s.bold(`[Attempt #${att.id}]`)} ${attBadge}${fixedTag} ${qualityTag} ${s.dim(`(${formatUtc(att.createdAt)})`)}\n`);
+
+      if (att.cause) {
+        stdout.write(`    ${s.dim('[USER CLAIM] Hypothesis:'.padEnd(26))} ${sanitizeForDisplay(att.cause)}\n`);
+      }
+      if (att.change) {
+        stdout.write(`    ${s.dim('[USER CLAIM] Attempted Fix:'.padEnd(26))} ${sanitizeForDisplay(att.change)}\n`);
+      }
+      if (att.observedChanges && Array.isArray(att.observedChanges.files) && att.observedChanges.files.length > 0) {
+        stdout.write(`    ${s.dim('[OBSERVED CHANGE] Files:'.padEnd(26))} ${s.dim(att.observedChanges.files.join(', '))}\n`);
+      }
+      if (att.verifyCmd) {
+        stdout.write(`    ${s.dim('Verify Command:'.padEnd(26))} ${s.cyan(sanitizeForDisplay(att.verifyCmd))}\n`);
+      }
 
       const runs = Array.isArray(att.verificationRuns) ? att.verificationRuns : [];
       if (runs.length > 0) {
         stdout.write(`    ${s.dim('Verification Runs:')}\n`);
         for (const run of runs) {
           const runBadge = run.result === 'PASSED' ? s.green('✓ PASSED (Exit 0)') : s.red(`✗ FAILED (Exit ${run.exitCode})`);
-          stdout.write(`      • ${runBadge} ${s.dim(`(${run.durationMs}ms at ${formatUtc(run.completedAt)})`)}\n`);
+          stdout.write(`      • ${s.dim('[VERIFIED RESULT]')} ${runBadge} ${s.dim(`(${run.durationMs}ms at ${formatUtc(run.completedAt)})`)}\n`);
         }
       }
       stdout.write('\n');

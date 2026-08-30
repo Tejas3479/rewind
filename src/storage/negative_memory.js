@@ -104,20 +104,20 @@ export function formatNegativeMemorySection(failedApproaches, styler) {
     lines.push(`  ${header}`);
 
     if (item.change) {
-      lines.push(`    ${s.dim('Attempted Fix:'.padEnd(16))} ${sanitizeForDisplay(item.change)}`);
+      lines.push(`    ${s.dim('[USER CLAIM] Fix:'.padEnd(26))} ${sanitizeForDisplay(item.change)}`);
     }
     if (item.cause) {
-      lines.push(`    ${s.dim('Hypothesis:'.padEnd(16))} ${sanitizeForDisplay(item.cause)}`);
+      lines.push(`    ${s.dim('[USER CLAIM] Hypothesis:'.padEnd(26))} ${sanitizeForDisplay(item.cause)}`);
     }
     if (item.verifyCmd) {
-      lines.push(`    ${s.dim('Verify Command:'.padEnd(16))} ${s.cyan(sanitizeForDisplay(item.verifyCmd))}`);
+      lines.push(`    ${s.dim('Verify Command:'.padEnd(26))} ${s.cyan(sanitizeForDisplay(item.verifyCmd))}`);
     }
     if (item.exitCode !== null && item.exitCode !== undefined) {
-      lines.push(`    ${s.dim('Outcome:'.padEnd(16))} ${s.red(`Failed (Exit Code: ${item.exitCode})`)}`);
+      lines.push(`    ${s.dim('[VERIFIED RESULT] Outcome:'.padEnd(26))} ${s.red(`Failed (Exit Code: ${item.exitCode})`)}`);
     }
     if (item.outputSnippet) {
       const cleanSnip = sanitizeForDisplay(item.outputSnippet.split('\n')[0]);
-      lines.push(`    ${s.dim('Error Snippet:'.padEnd(16))} ${s.dim(cleanSnip)}`);
+      lines.push(`    ${s.dim('Error Snippet:'.padEnd(26))} ${s.dim(cleanSnip)}`);
     }
     lines.push('');
   }

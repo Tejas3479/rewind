@@ -13,16 +13,40 @@ export const IncidentStatus = Object.freeze({
 
 /**
  * 2. Recovery Attempt Status (Per-Remediation Lifecycle)
+ * Strictly distinguishes user claims (FIXED) from empirical outcomes (VERIFIED).
  */
 export const RecoveryAttemptStatus = Object.freeze({
-  PROPOSED: 'PROPOSED',     // Cause hypothesis recorded or change described, awaiting verification
-  ATTEMPTED: 'ATTEMPTED',   // Verification initiated or executed
-  FAILED: 'FAILED',         // Verification failed (Negative Memory)
+  PROPOSED: 'PROPOSED',     // Cause hypothesis recorded or change described, awaiting application
+  ATTEMPTED: 'ATTEMPTED',   // Verification initiated or remediation actively in progress
+  FIXED: 'FIXED',           // User asserts that the change was applied, but unverified
+  FAILED: 'FAILED',         // Verification failed with non-zero exit (Negative Memory)
   VERIFIED: 'VERIFIED'      // Explicit verification command passed (Exit 0)
 });
 
 /**
- * 3. Derived Evidence Flags (Dynamically computed from historical evidence)
+ * 3. Evidence Provenance Types (Distinguishes user assertions from automated empirical facts)
+ */
+export const ProvenanceType = Object.freeze({
+  USER_REPORTED: 'USER_REPORTED',                   // User-provided statements, hypotheses, descriptions
+  AUTOMATICALLY_OBSERVED: 'AUTOMATICALLY_OBSERVED', // Git status, file touches, process exit codes, timing, env
+  DIRECTLY_VERIFIED: 'DIRECTLY_VERIFIED',           // Explicit verification execution run with recorded outcome
+  INFERRED: 'INFERRED',                             // Derived patterns, similarity heuristics
+  UNKNOWN: 'UNKNOWN'                                // Legacy or unclassified data
+});
+
+/**
+ * 4. Evidence Quality Ratings (Communicates what Rewind actually knows without arbitrary numbers)
+ */
+export const EvidenceQuality = Object.freeze({
+  DIRECT: 'DIRECT',               // Primary process capture or direct verification run
+  SUPPORTED: 'SUPPORTED',         // Corroborated by verified historical proof
+  USER_REPORTED: 'USER_REPORTED', // Unverified user statement
+  INFERRED: 'INFERRED',           // Algorithmic heuristic or unverified pattern
+  UNVERIFIED: 'UNVERIFIED'        // Fix proposed or marked FIXED without successful verification run
+});
+
+/**
+ * 5. Derived Evidence Flags (Dynamically computed from historical evidence)
  */
 export const EvidenceFlags = Object.freeze({
   STALE: 'STALE',                           // Relevant runtime/config changed since verification
@@ -79,10 +103,17 @@ const VALID_ATTEMPT_TRANSITIONS = {
   [RecoveryAttemptStatus.PROPOSED]: new Set([
     RecoveryAttemptStatus.PROPOSED,
     RecoveryAttemptStatus.ATTEMPTED,
+    RecoveryAttemptStatus.FIXED,
     RecoveryAttemptStatus.FAILED,
     RecoveryAttemptStatus.VERIFIED
   ]),
   [RecoveryAttemptStatus.ATTEMPTED]: new Set([
+    RecoveryAttemptStatus.FIXED,
+    RecoveryAttemptStatus.FAILED,
+    RecoveryAttemptStatus.VERIFIED
+  ]),
+  [RecoveryAttemptStatus.FIXED]: new Set([
+    RecoveryAttemptStatus.ATTEMPTED,
     RecoveryAttemptStatus.FAILED,
     RecoveryAttemptStatus.VERIFIED
   ]),

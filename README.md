@@ -41,7 +41,7 @@ node bin/rewind.js patterns --explain
 # 9. Query structured forensic context for coding agents
 node bin/rewind.js context latest --json
 
-# 10. Run the complete automated test suite (249 tests across 65 suites, 0 dependencies)
+# 10. Run the complete automated test suite (254 tests across 66 suites, 0 dependencies)
 npm test
 
 # 11. Audit cryptographic integrity of the local ledger
@@ -62,15 +62,16 @@ Command history logs *what* was typed, but not *why* it failed, *what* was chang
 **Rewind** bridges this gap:
 1. **Captures Failures:** Wraps command execution, streaming live stdout/stderr while recording exit codes, timing, environment metadata, bounded logs with SHA-256 evidence hashing, and git HEAD status upon failure.
 2. **Structured Diagnostic Parsing Layer:** Conservative, language-aware runtime error parsers (Node.js/V8, Python tracebacks, Rust compiler errors, Go runtime panics) with strict confidence taxonomy (`EXACTLY_PARSED`, `INFERRED`, `UNKNOWN`), extracting error codes, source locations, and call stacks while preserving raw forensic evidence intact.
-3. **Authoritative Event Journal (`journal.jsonl`):** Implements an append-only, immutable event sourcing architecture where every lifecycle mutation is an immutable event cryptographically sealed with SHA-256.
-4. **Four-Layer History-Integrity Layer:** Protects the local ledger against accidental corruption, unauthorized file modification, deleted intermediate events, reordered events, tail deletion, and derived view drift.
-5. **Disposable Derived Projections (`records/`):** Incident records in `.rewind/records/` and in-memory indices are rebuildable projections derived from pure journal replay.
-6. **Fingerprints Error Memory:** Conservatively normalizes transient noise (timestamps, PIDs, temporary paths, memory pointers) and computes reproducible 16-character SHA-256 fingerprints.
-7. **Enforces the Trust Loop & 3-Tier State Model:** Strictly separates Incident Status (`OBSERVED`, `OPEN`, `RECOVERED`, `REGRESSED`, `RESOLVED`), Recovery Attempt Status (`PROPOSED`, `ATTEMPTED`, `FAILED`, `VERIFIED`), and Derived Evidence Flags (`STALE`, `CONTRADICTED`, `DIVERGENT_EVIDENCE`).
-8. **Multi-Attempt History & Negative Memory:** Preserves every remediation attempt chronologically. When an attempt fails verification, it is permanently sealed into *Negative Memory* (`KNOWN FAILED APPROACHES`), warning developers away from repeating dead ends.
-9. **Relevance-Aware Staleness Evaluation:** Detects when a verified fix may no longer apply due to major runtime changes (e.g. Node 20 to Node 22), OS platform changes, or missing environment keys—without falsely invalidating on harmless git commits or patch bumps.
-10. **Contradiction vs. Divergence Analysis:** Detects when two historical verification runs under equivalent conditions produced conflicting outcomes (`CONTRADICTED`) vs cross-platform differences (`DIVERGENT_EVIDENCE`).
-11. **Near-Match & Exact-Match Search:** Deterministically searches historical failures using keyword recall, Jaccard overlap, exact fingerprint matching, and strict evidence confidence labels (`EXACT MATCH: VERIFIED`, `SIMILAR: VERIFIED RECOVERY`, `LIKELY PATTERN`, `NOT PROVEN`).
+3. **Recovery Provenance & Evidence Quality Layer:** Strictly separates **WHAT THE USER SAID** (`USER_REPORTED` / `[USER CLAIM]`), **WHAT REWIND OBSERVED** (`AUTOMATICALLY_OBSERVED` / `[OBSERVED CHANGE]`), **INFERENCE** (`INFERRED`), and **WHAT WAS ACTUALLY VERIFIED** (`DIRECTLY_VERIFIED` / `[VERIFIED RESULT]`), strictly enforcing `USER_REPORTED != VERIFIED`, `FIXED != VERIFIED`, and `SIMILAR != PROVEN`.
+4. **Authoritative Event Journal (`journal.jsonl`):** Implements an append-only, immutable event sourcing architecture where every lifecycle mutation is an immutable event cryptographically sealed with SHA-256.
+5. **Four-Layer History-Integrity Layer:** Protects the local ledger against accidental corruption, unauthorized file modification, deleted intermediate events, reordered events, tail deletion, and derived view drift.
+6. **Disposable Derived Projections (`records/`):** Incident records in `.rewind/records/` and in-memory indices are rebuildable projections derived from pure journal replay.
+7. **Fingerprints Error Memory:** Conservatively normalizes transient noise (timestamps, PIDs, temporary paths, memory pointers) and computes reproducible 16-character SHA-256 fingerprints.
+8. **Enforces the Trust Loop & 3-Tier State Model:** Strictly separates Incident Status (`OBSERVED`, `OPEN`, `RECOVERED`, `REGRESSED`, `RESOLVED`), Recovery Attempt Status (`PROPOSED`, `ATTEMPTED`, `FIXED`, `FAILED`, `VERIFIED`), and Derived Evidence Flags (`STALE`, `CONTRADICTED`, `DIVERGENT_EVIDENCE`).
+9. **Multi-Attempt History & Negative Memory:** Preserves every remediation attempt chronologically. When an attempt fails verification, it is permanently sealed into *Negative Memory* (`KNOWN FAILED APPROACHES`), warning developers away from repeating dead ends.
+10. **Relevance-Aware Staleness Evaluation:** Detects when a verified fix may no longer apply due to major runtime changes (e.g. Node 20 to Node 22), OS platform changes, or missing environment keys—without falsely invalidating on harmless git commits or patch bumps.
+11. **Contradiction vs. Divergence Analysis:** Detects when two historical verification runs under equivalent conditions produced conflicting outcomes (`CONTRADICTED`) vs cross-platform differences (`DIVERGENT_EVIDENCE`).
+12. **Near-Match & Exact-Match Search:** Deterministically searches historical failures using keyword recall, Jaccard overlap, exact fingerprint matching, and strict evidence confidence labels (`EXACT MATCH: VERIFIED`, `SIMILAR: VERIFIED RECOVERY`, `LIKELY PATTERN`, `NOT PROVEN`).
 
 ---
 

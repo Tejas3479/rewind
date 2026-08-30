@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { IncidentStatus, RecoveryAttemptStatus } from './state.js';
+import { IncidentStatus, RecoveryAttemptStatus, ProvenanceType, EvidenceQuality } from './state.js';
 import { normalizeRecordToCurrentSchema } from './record.js';
 
 export const PROJECTION_SCHEMA_VERSION = 1;
@@ -105,14 +105,22 @@ export function projectEventsToRecords(events = []) {
         const payload = event.payload || {};
         const currentAttempts = Array.isArray(existing.recoveryAttempts) ? [...existing.recoveryAttempts] : [];
         const attemptId = payload.attemptId || (currentAttempts.length + 1);
+        const isFixed = Boolean(payload.isFixed || payload.status === RecoveryAttemptStatus.FIXED);
+        const status = payload.status || (isFixed ? RecoveryAttemptStatus.FIXED : RecoveryAttemptStatus.PROPOSED);
+        const quality = payload.evidenceQuality || (isFixed ? EvidenceQuality.UNVERIFIED : (payload.change ? EvidenceQuality.USER_REPORTED : EvidenceQuality.UNVERIFIED));
 
         const newAttempt = {
           id: attemptId,
           createdAt: event.timestamp,
           cause: payload.cause || null,
+          causeProvenance: payload.cause ? (payload.causeProvenance || ProvenanceType.USER_REPORTED) : null,
           change: payload.change || null,
+          changeProvenance: payload.change ? (payload.changeProvenance || ProvenanceType.USER_REPORTED) : null,
           verifyCmd: payload.verifyCmd || null,
-          status: RecoveryAttemptStatus.PROPOSED,
+          verifyCmdProvenance: payload.verifyCmd ? (payload.verifyCmdProvenance || ProvenanceType.USER_REPORTED) : null,
+          observedChanges: payload.observedChanges || null,
+          status,
+          evidenceQuality: quality,
           verificationRuns: []
         };
 
@@ -128,6 +136,39 @@ export function projectEventsToRecords(events = []) {
           }
         };
         incidents.set(id, normalizeRecordToCurrentSchema(updated));
+        break;
+      }
+
+      case 'recovery.fixed': {
+        const existing = incidents.get(id);
+        if (!existing) break;
+
+        const payload = event.payload || {};
+        const currentAttempts = Array.isArray(existing.recoveryAttempts) ? [...existing.recoveryAttempts] : [];
+        const targetAttemptId = payload.attemptId || (currentAttempts.length > 0 ? currentAttempts[currentAttempts.length - 1].id : 1);
+        const attemptIndex = currentAttempts.findIndex((a) => a.id === targetAttemptId);
+
+        if (attemptIndex !== -1) {
+          const targetAttempt = { ...currentAttempts[attemptIndex] };
+          targetAttempt.status = RecoveryAttemptStatus.FIXED;
+          targetAttempt.evidenceQuality = EvidenceQuality.UNVERIFIED;
+          if (payload.observedChanges) {
+            targetAttempt.observedChanges = payload.observedChanges;
+          }
+          currentAttempts[attemptIndex] = targetAttempt;
+
+          const updated = {
+            ...existing,
+            recoveryAttempts: currentAttempts,
+            _projection: {
+              notice: 'DERIVED AND REBUILDABLE. Authoritative source of truth is .rewind/journal.jsonl',
+              projectionSchemaVersion: PROJECTION_SCHEMA_VERSION,
+              derivedFromSequence: event.sequence,
+              projectedAt: event.timestamp
+            }
+          };
+          incidents.set(id, normalizeRecordToCurrentSchema(updated));
+        }
         break;
       }
 
@@ -156,10 +197,12 @@ export function projectEventsToRecords(events = []) {
             output: payload.output || '',
             outputHash: payload.outputHash || crypto.createHash('sha256').update(payload.output || '', 'utf8').digest('hex'),
             environmentFingerprint: payload.environmentFingerprint || existing.environment?.fingerprint || '',
-            result: isPassed ? 'PASSED' : 'FAILED'
+            result: isPassed ? 'PASSED' : 'FAILED',
+            provenance: payload.provenance || ProvenanceType.DIRECTLY_VERIFIED
           };
 
           targetAttempt.status = isPassed ? RecoveryAttemptStatus.VERIFIED : RecoveryAttemptStatus.FAILED;
+          targetAttempt.evidenceQuality = isPassed ? EvidenceQuality.DIRECT : EvidenceQuality.DIRECT;
           targetAttempt.verificationRuns = [...currentRuns, newRun];
           currentAttempts[attemptIndex] = targetAttempt;
 

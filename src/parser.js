@@ -136,7 +136,8 @@ export function parseArgs(rawArgs = []) {
     repair: false,
     dryRun: false,
     timeout: null,
-    shell: false
+    shell: false,
+    fixed: false
   };
 
   const positional = [];
@@ -268,6 +269,9 @@ export function parseArgs(rawArgs = []) {
       i++;
     } else if (arg === '--dry-run') {
       flags.dryRun = true;
+      i++;
+    } else if (arg === '--fixed') {
+      flags.fixed = true;
       i++;
     } else if (arg.startsWith('-')) {
       throw new InvalidArgumentError(`Unknown option: "${arg}". Run "rewind --help" for usage.`);

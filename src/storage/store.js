@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { createRecord, isValidRecord, normalizeRecordToCurrentSchema, boundOutput } from './record.js';
-import { IncidentStatus, RecoveryAttemptStatus } from './state.js';
+import { IncidentStatus, RecoveryAttemptStatus, ProvenanceType, EvidenceQuality } from './state.js';
 import { computeFingerprint } from './fingerprint.js';
 import { evaluateStaleness } from './staleness.js';
 import { extractNegativeMemory } from './negative_memory.js';
@@ -509,6 +509,11 @@ export class StorageEngine {
 
     const currentAttempts = Array.isArray(existing.recoveryAttempts) ? existing.recoveryAttempts : [];
     const attemptId = currentAttempts.length + 1;
+    const isFixed = Boolean(attemptData.isFixed || attemptData.status === RecoveryAttemptStatus.FIXED);
+    const initialStatus = isFixed ? RecoveryAttemptStatus.FIXED : RecoveryAttemptStatus.PROPOSED;
+    const quality = isFixed
+      ? EvidenceQuality.UNVERIFIED
+      : (attemptData.change ? EvidenceQuality.USER_REPORTED : EvidenceQuality.UNVERIFIED);
 
     // Append recovery.proposed event to authoritative journal
     appendJournalEvent(this.ledgerDir, {
@@ -517,14 +522,58 @@ export class StorageEngine {
       payload: {
         attemptId,
         cause: attemptData.cause || null,
+        causeProvenance: attemptData.cause ? (attemptData.causeProvenance || ProvenanceType.USER_REPORTED) : null,
         change: attemptData.change || null,
-        verifyCmd: attemptData.verifyCmd || null
+        changeProvenance: attemptData.change ? (attemptData.changeProvenance || ProvenanceType.USER_REPORTED) : null,
+        verifyCmd: attemptData.verifyCmd || null,
+        verifyCmdProvenance: attemptData.verifyCmd ? (attemptData.verifyCmdProvenance || ProvenanceType.USER_REPORTED) : null,
+        isFixed,
+        status: initialStatus,
+        observedChanges: attemptData.observedChanges || null,
+        evidenceQuality: quality
       }
     });
 
     // Replay projection and refresh in-memory state
     this.rebuildIndex({ syncDisk: true });
 
+    return this.getRecord(strId);
+  }
+
+  /**
+   * Marks a specific recovery attempt as FIXED (user-applied, unverified) in the authoritative journal.
+   *
+   * @param {string|number} id
+   * @param {number} attemptId
+   * @param {object} [data={}]
+   * @returns {import('./record.js').IncidentRecord}
+   */
+  markAttemptFixed(id, attemptId, data = {}) {
+    if (!this.initialized) {
+      this.init();
+    }
+
+    const strId = normalizeId(id);
+    const existing = this.getRecord(strId);
+    if (!existing) {
+      throw new CliError(`Incident #${strId} not found in ledger.`, {
+        code: 'ERR_NOT_FOUND',
+        exitCode: 1,
+        details: { id: strId, suggestion: 'Run "rewind history" to browse all past incidents.' }
+      });
+    }
+
+    appendJournalEvent(this.ledgerDir, {
+      type: 'recovery.fixed',
+      incidentId: strId,
+      payload: {
+        attemptId,
+        observedChanges: data.observedChanges || null,
+        evidenceQuality: EvidenceQuality.UNVERIFIED
+      }
+    });
+
+    this.rebuildIndex({ syncDisk: true });
     return this.getRecord(strId);
   }
 
@@ -581,7 +630,9 @@ export class StorageEngine {
         output: outputContent,
         outputHash,
         environmentFingerprint: runData.environmentFingerprint || existing.environment?.fingerprint || '',
-        result: isPassed ? 'PASSED' : 'FAILED'
+        result: isPassed ? 'PASSED' : 'FAILED',
+        provenance: ProvenanceType.DIRECTLY_VERIFIED,
+        evidenceQuality: EvidenceQuality.DIRECT
       }
     });
 
