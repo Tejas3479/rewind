@@ -25,6 +25,6 @@ Every source file strictly uses node:* built-in modules or relative project file
 
 4. Test suite run (zero dependencies installed):
 $ node --test
-✔ 33 test files passed
-✔ 299 tests passed
+✔ 34 test files passed
+✔ 309 tests passed
 ✔ 0 failures, 0 skipped, 0 cancelled

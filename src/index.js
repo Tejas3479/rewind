@@ -32,3 +32,4 @@ export {
   NotImplementedError,
   ConfigError
 } from './errors.js';
+export { diffLines, diffWords, createUnifiedDiff, formatColorDiff } from './diff.js';
