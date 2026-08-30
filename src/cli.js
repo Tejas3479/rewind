@@ -88,8 +88,8 @@ export async function runCLI(
     const exitCode = await dispatch({ context });
     return typeof exitCode === 'number' ? exitCode : ExitCodes.SUCCESS;
   } catch (err) {
-    const isCliError = err instanceof CliError;
-    const exitCode = isCliError ? err.exitCode : ExitCodes.FAILURE;
+    const isCliError = err instanceof CliError || (err && typeof err.exitCode === 'number');
+    const exitCode = isCliError && typeof err.exitCode === 'number' ? err.exitCode : ExitCodes.FAILURE;
     const isJsonMode = Boolean(parsedArgs?.flags?.json);
 
     if (isJsonMode) {
