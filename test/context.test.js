@@ -89,6 +89,8 @@ describe('Agent-Consumption Interface (src/storage/context.js & rewind context)'
       assert.strictEqual(context.query.resolvedIncidentId, '2');
       assert.strictEqual(context.observedEvidence.failure.id, '2');
       assert.strictEqual(context.observedEvidence.failure.command, 'npm');
+      assert.ok(context.observedEvidence.failure.createdAt);
+      assert.strictEqual(typeof context.observedEvidence.failure.createdAt, 'string');
       assert.strictEqual(context.ledgerTrust.isTrusted, true);
       assert.strictEqual(context.safety.mayAutoExecuteCommands, false);
       assert.ok(Array.isArray(context.warnings));

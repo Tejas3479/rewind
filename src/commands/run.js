@@ -1,5 +1,6 @@
 import { MissingArgumentError } from '../errors.js';
 import { executeAndCapture } from '../capture.js';
+import { hasShellOperators } from '../parser.js';
 import { formatJson } from '../formatter.js';
 import { IncidentStatus } from '../storage/state.js';
 import { sanitizeForDisplay } from '../sanitizer.js';
@@ -31,11 +32,16 @@ export async function runCommand({ context }) {
   const stdoutStream = isJsonMode ? null : stdout;
   const stderrStream = isJsonMode ? null : stderr;
 
+  const isShellCommand = Boolean(parsedArgs.flags.shell) ||
+    (targetCommand.length === 1 && hasShellOperators(targetCommand[0])) ||
+    targetCommand.some(token => ['&&', '||', ';', '|', '&', '>', '<'].includes(token));
+
   const result = await executeAndCapture(targetCommand, {
     cwd: config.rootDir,
     env,
     stdoutStream,
-    stderrStream
+    stderrStream,
+    shell: isShellCommand
   });
 
   let savedRecord = null;

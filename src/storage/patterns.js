@@ -115,8 +115,8 @@ export function analyzeFamilyPatterns(fingerprint, records, familyEvents) {
   const firstRecord = records[0];
   const lastRecord = records[records.length - 1];
 
-  const firstSeen = firstRecord ? firstRecord.createdAt : null;
-  const lastSeen = lastRecord ? lastRecord.createdAt : null;
+  const firstSeen = firstRecord ? (firstRecord.startTime || firstRecord.createdAt || null) : null;
+  const lastSeen = lastRecord ? (lastRecord.startTime || lastRecord.createdAt || null) : null;
 
   // Extract brief error summary from evidence
   const representativeSnippet = firstRecord?.normalizedError ||

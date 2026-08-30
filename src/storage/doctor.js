@@ -361,7 +361,7 @@ export function runDoctorDiagnostics(ledgerDir, config = {}, options = {}) {
     const readResult = readJournalEvents(journalPath);
     journalEvents = readResult.events || [];
     journalMalformed = readResult.malformed || [];
-    journalExamined = readResult.examined || 0;
+    journalExamined = typeof readResult.totalLines === 'number' ? readResult.totalLines : (readResult.events || []).length;
     journalValid = journalEvents.length;
   }
 

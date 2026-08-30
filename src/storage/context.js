@@ -140,7 +140,7 @@ export function buildAgentContext(ledgerDir, targetIdOrLatest = 'latest', option
         similarity: null,
         evidenceStrength: 'STRONG',
         verificationState: hasVerified ? 'VERIFIED' : (r.status === IncidentStatus.OPEN ? 'UNVERIFIED' : r.status),
-        firstSeen: r.createdAt,
+        firstSeen: r.startTime || r.createdAt || null,
         command: r.command,
         fullCommand: r.fullCommand
       });
@@ -319,7 +319,7 @@ export function buildAgentContext(ledgerDir, targetIdOrLatest = 'latest', option
         exitCode: targetRecord.exitCode,
         signal: targetRecord.signal,
         durationMs: targetRecord.durationMs,
-        createdAt: targetRecord.createdAt,
+        createdAt: targetRecord.startTime || targetRecord.createdAt || null,
         fingerprint: targetRecord.fingerprint,
         normalizedError: targetRecord.normalizedError,
         storedEvidenceHash: targetRecord.evidenceHash,

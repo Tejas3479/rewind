@@ -111,6 +111,10 @@ describe('Pattern Intelligence Layer (src/storage/patterns.js)', () => {
 
       const recurringReport = report.patterns.find((p) => p.totalIncidents === 3);
       assert.ok(recurringReport);
+      assert.ok(recurringReport.firstSeen);
+      assert.ok(recurringReport.lastSeen);
+      assert.strictEqual(typeof recurringReport.firstSeen, 'string');
+      assert.strictEqual(typeof recurringReport.lastSeen, 'string');
       assert.ok(recurringReport.classifications.some((c) => c.type === PatternTypes.RECURRING_FAILURE));
 
       const isolatedReport = report.patterns.find((p) => p.totalIncidents === 1);

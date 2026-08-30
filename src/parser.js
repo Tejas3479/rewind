@@ -155,8 +155,51 @@ export function parseArgs(rawArgs = []) {
   while (i < rawArgs.length) {
     const arg = rawArgs[i];
 
-    // If we have already identified the command as 'run', all remaining tokens are part of the target command
+    // If we have already identified the command as 'run', check for run flags before the target command
     if (command === 'run') {
+      if (positional.length === 0) {
+        if (arg === '--shell' || arg === '-s') {
+          flags.shell = true;
+          i++;
+          continue;
+        }
+        if (arg === '--json') {
+          flags.json = true;
+          i++;
+          continue;
+        }
+        if (arg === '--no-color') {
+          flags.noColor = true;
+          i++;
+          continue;
+        }
+        if (arg === '--root') {
+          i++;
+          if (i >= rawArgs.length || rawArgs[i].startsWith('-')) {
+            throw new InvalidArgumentError('Option "--root" requires a path argument.');
+          }
+          flags.root = rawArgs[i];
+          i++;
+          continue;
+        }
+        if (arg.startsWith('--root=')) {
+          const val = arg.slice('--root='.length);
+          if (!val) {
+            throw new InvalidArgumentError('Option "--root" requires a path argument.');
+          }
+          flags.root = val;
+          i++;
+          continue;
+        }
+        if (arg === '--') {
+          i++;
+          while (i < rawArgs.length) {
+            positional.push(rawArgs[i]);
+            i++;
+          }
+          break;
+        }
+      }
       positional.push(arg);
       i++;
       continue;

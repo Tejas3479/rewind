@@ -544,42 +544,6 @@ export class StorageEngine {
     return this.getRecord(strId);
   }
 
-  /**
-   * Marks a specific recovery attempt as FIXED (user-applied, unverified) in the authoritative journal.
-   *
-   * @param {string|number} id
-   * @param {number} attemptId
-   * @param {object} [data={}]
-   * @returns {import('./record.js').IncidentRecord}
-   */
-  markAttemptFixed(id, attemptId, data = {}) {
-    if (!this.initialized) {
-      this.init();
-    }
-
-    const strId = normalizeId(id);
-    const existing = this.getRecord(strId);
-    if (!existing) {
-      throw new CliError(`Incident #${strId} not found in ledger.`, {
-        code: 'ERR_NOT_FOUND',
-        exitCode: 1,
-        details: { id: strId, suggestion: 'Run "rewind history" to browse all past incidents.' }
-      });
-    }
-
-    appendJournalEvent(this.ledgerDir, {
-      type: 'recovery.fixed',
-      incidentId: strId,
-      payload: {
-        attemptId,
-        observedChanges: data.observedChanges || null,
-        evidenceQuality: EvidenceQuality.UNVERIFIED
-      }
-    });
-
-    this.rebuildIndex({ syncDisk: true });
-    return this.getRecord(strId);
-  }
 
   /**
    * Records a verification execution run on a specific recovery attempt in the authoritative journal.
@@ -646,42 +610,6 @@ export class StorageEngine {
     return this.getRecord(strId);
   }
 
-  /**
-   * Compatibility method for updating arbitrary fields via updater function.
-   *
-   * @param {string|number} id
-   * @param {(current: import('./record.js').IncidentRecord) => import('./record.js').IncidentRecord} updaterFn
-   * @returns {import('./record.js').IncidentRecord}
-   */
-  updateRecord(id, updaterFn) {
-    if (!this.initialized) {
-      this.init();
-    }
-
-    const strId = normalizeId(id);
-    const existing = this.getRecord(strId);
-    if (!existing) {
-      throw new CliError(`Incident #${strId} not found in ledger.`, {
-        code: 'ERR_NOT_FOUND',
-        exitCode: 1,
-        details: { id: strId, suggestion: 'Run "rewind history" to browse all past incidents.' }
-      });
-    }
-
-    const updated = updaterFn(existing);
-    const normalized = normalizeRecordToCurrentSchema(updated);
-
-    // If updating recoveries/attempts, append events
-    if (updated.recoveryAttempts && updated.recoveryAttempts.length > (existing.recoveryAttempts || []).length) {
-      const latestAttempt = updated.recoveryAttempts[updated.recoveryAttempts.length - 1];
-      return this.addRecoveryAttempt(strId, latestAttempt);
-    }
-
-    // Otherwise sync directly
-    this.index.set(strId, normalized);
-    writeProjectedRecords(this.ledgerDir, this.index);
-    return normalized;
-  }
 
   /**
    * Evaluates staleness of a historical record against the current environment.

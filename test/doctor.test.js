@@ -169,6 +169,12 @@ describe('Self-Diagnostics & Safe Maintenance (src/storage/doctor.js & rewind do
       assert.strictEqual(integrityCheck.details.layers.chainLinkage, 'PASS');
       assert.strictEqual(integrityCheck.details.layers.checkpointCommitment, 'PASS');
 
+      // Verify Record & Journal Syntax Check line counts
+      const syntaxCheck = report.healthChecks.find(c => c.id === 'record_corruption');
+      assert.ok(syntaxCheck);
+      assert.strictEqual(syntaxCheck.status, 'PASS');
+      assert.ok(syntaxCheck.message.includes('1 record files and 3 journal lines'));
+
       // Verify repair is not needed
       assert.strictEqual(report.repair.available, false);
       assert.strictEqual(report.repair.recommended, false);
