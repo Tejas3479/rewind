@@ -5,6 +5,7 @@ import { readGitMetadata } from './git.js';
 import { captureSafeEnvironment } from './environment.js';
 import { sanitizeOutput } from './sanitizer.js';
 import { SpawnError } from './errors.js';
+import { parseDiagnostic } from './diagnostics/index.js';
 
 /**
  * Maximum captured buffer size per stream (10MB) to prevent resource exhaustion.
@@ -302,6 +303,7 @@ export async function executeAndCapture(commandTokens, options = {}) {
       // Safe git and environment metadata
       const gitMetadata = readGitMetadata(cwd);
       const safeEnv = captureSafeEnvironment(env);
+      const diagnostic = parseDiagnostic(stderrSanitized || stderrRaw, stdoutSanitized || stdoutRaw, { command: executable, cwd });
 
       const resolvedExitCode = exitCode !== null ? exitCode : (signal ? mapSignalToExitCode(signal) : 1);
 
@@ -322,6 +324,7 @@ export async function executeAndCapture(commandTokens, options = {}) {
         stderrRaw,
         stdout: stdoutSanitized,
         stderr: stderrSanitized,
+        diagnostic,
         isTruncated: stdoutTruncated || stderrTruncated,
         git: gitMetadata,
         environment: safeEnv

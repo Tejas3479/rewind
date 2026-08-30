@@ -314,6 +314,7 @@ export function buildAgentContext(ledgerDir, targetIdOrLatest = 'latest', option
         fingerprint: targetRecord.fingerprint,
         normalizedError: targetRecord.normalizedError,
         storedEvidenceHash: targetRecord.evidenceHash,
+        diagnostic: targetRecord.diagnostic || null,
         stderrSnippet: sanitizeSnippet(targetRecord.stderr, maxChars),
         stdoutSnippet: sanitizeSnippet(targetRecord.stdout, maxChars),
         isTruncated: Boolean(targetRecord.isTruncated),

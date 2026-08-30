@@ -94,9 +94,18 @@ This document details every third-party package normally used for these features
 
 ---
 
-### 11. Automated Testing Framework
+### 11. Structured Diagnostic Error Parsing
+
+* **Normally:** `stack-trace`, `error-stack-parser`, `traceback-parser`, or language-specific AST parsers
+* **Rewind uses:** Native ECMAScript regular expressions and string tokenization across Node.js/V8, Python, Rust, and Go runtimes with strict confidence classification (`EXACTLY_PARSED`, `INFERRED`, `UNKNOWN`).
+* **Why:** Extracts structured runtime diagnostic metadata (error codes, exception types, source files, line/column numbers, stack frames) conservatively while preserving raw forensic evidence intact without heavy external parser libraries.
+* **Actual Code Location:** [`src/diagnostics/`](./src/diagnostics/)
+
+---
+
+### 12. Automated Testing Framework
 
 * **Normally:** `jest`, `mocha`, `vitest`, or `chai`
 * **Rewind uses:** Native Node.js test runner (`node:test`) and assertion module (`node:assert/strict`).
-* **Why:** Comprehensive unit, integration, security, and cross-platform testing (233 test cases across 64 test suites) executed directly with `node --test` without installing any test framework dependencies.
+* **Why:** Comprehensive unit, integration, security, and cross-platform testing (249 test cases across 65 test suites) executed directly with `node --test` without installing any test framework dependencies.
 * **Actual Code Location:** [`test/*.test.js`](./test/)

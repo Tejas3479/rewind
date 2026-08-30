@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { computeFingerprint } from './fingerprint.js';
 import { IncidentStatus, RecoveryAttemptStatus } from './state.js';
+import { parseDiagnostic } from '../diagnostics/index.js';
 
 const MAX_OUTPUT_HEAD = 64 * 1024; // 64 KB
 const MAX_OUTPUT_TAIL = 16 * 1024; // 16 KB
@@ -142,6 +143,7 @@ export function createRecord(id, captureResult, options = {}) {
     stderrRaw: captureResult.stderrRaw,
     evidenceHash,
     normalizedError,
+    diagnostic: captureResult.diagnostic || parseDiagnostic(captureResult.stderrRaw || captureResult.stderr, captureResult.stdoutRaw || captureResult.stdout, { command: captureResult.command, cwd: captureResult.cwd }),
     git: { ...captureResult.git },
     environment: { ...captureResult.environment },
     regressionOf: options.regressionOf || null,
@@ -164,6 +166,11 @@ export function normalizeRecordToCurrentSchema(record) {
   if (!record || typeof record !== 'object') return record;
 
   const copy = { ...record };
+
+  // Ensure diagnostic is present (parse legacy records on the fly if missing)
+  if (copy.diagnostic === undefined) {
+    copy.diagnostic = parseDiagnostic(copy.stderrRaw || copy.stderr, copy.stdoutRaw || copy.stdout, { command: copy.command, cwd: copy.cwd });
+  }
 
   // Ensure recoveryAttempts is present
   if (!Array.isArray(copy.recoveryAttempts)) {

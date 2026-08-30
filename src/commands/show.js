@@ -101,6 +101,32 @@ export async function showCommand({ context }) {
   }
   stdout.write('\n');
 
+  // Section 2.5: Structured Diagnostic
+  const diag = record.diagnostic;
+  if (diag && diag.language) {
+    stdout.write(`${s.bold('STRUCTURED DIAGNOSTIC:')}\n`);
+    stdout.write(`  ${s.dim('Language:'.padEnd(18))} ${s.cyan(diag.language.toUpperCase())}${diag.runtime ? ` (${diag.runtime})` : ''} ${s.dim(`[Confidence: ${diag.confidence}]`)}\n`);
+    if (diag.errorType) stdout.write(`  ${s.dim('Error Type:'.padEnd(18))} ${s.bold(s.red(diag.errorType))}\n`);
+    if (diag.errorCode) stdout.write(`  ${s.dim('Error Code:'.padEnd(18))} ${s.yellow(diag.errorCode)}\n`);
+    if (diag.sourceFile) {
+      const locStr = `${diag.sourceFile}${diag.line ? `:${diag.line}` : ''}${diag.column ? `:${diag.column}` : ''}`;
+      stdout.write(`  ${s.dim('Primary Location:'.padEnd(18))} ${s.bold(locStr)}\n`);
+    }
+    if (diag.message) {
+      stdout.write(`  ${s.dim('Message:'.padEnd(18))} ${sanitizeForDisplay(diag.message)}\n`);
+    }
+    if (Array.isArray(diag.stackFrames) && diag.stackFrames.length > 0) {
+      stdout.write(`  ${s.dim('Call Stack:'.padEnd(18))} ${s.dim(`(${diag.stackFrames.length} frame(s) identified)`)}\n`);
+      for (let fi = 0; fi < Math.min(diag.stackFrames.length, 3); fi++) {
+        const frame = diag.stackFrames[fi];
+        const fnName = frame.function ? `${frame.function} ` : '';
+        const loc = frame.file ? `(${frame.file}:${frame.line || '?'}:${frame.column || '?'})` : frame.raw;
+        stdout.write(`    ${s.dim('•')} ${fnName}${s.dim(loc)}\n`);
+      }
+    }
+    stdout.write('\n');
+  }
+
   // Section 3: Captured Stderr & Stdout Evidence
   if (record.stderr && record.stderr.trim()) {
     stdout.write(`${s.bold('CAPTURED STDERR:')}\n`);

@@ -468,6 +468,7 @@ export class StorageEngine {
         stderrSnippet: boundStderr.bounded || '',
         stdoutSnippet: boundStdout.bounded || '',
         isTruncated: Boolean(isTruncated),
+        diagnostic: captureResult.diagnostic || null,
         environment: captureResult.environment || {},
         git: captureResult.git || { isGit: false },
         regressionOf: regressionOf || null
