@@ -88,6 +88,24 @@ const COMMAND_DOCS = {
       'rewind triage 1 --timeout 30000'
     ]
   },
+  hook: {
+    usage: 'rewind hook <shell|record> [options]',
+    description: 'Print shell integration scripts for bash, zsh, or powershell, or record failed commands passively.',
+    arguments: [
+      { name: '<shell>', description: 'Shell type: "bash", "zsh", or "powershell" (prints hook script)' }
+    ],
+    options: [
+      { flag: '--no-color', description: 'Disable ANSI color formatting' },
+      { flag: '--root <path>', description: 'Explicit project root / ledger directory' }
+    ],
+    examples: [
+      'eval "$(rewind hook bash)"',
+      'eval "$(rewind hook zsh)"',
+      'Invoke-Expression (& rewind hook powershell | Out-String)',
+      'rewind hook bash',
+      'rewind hook powershell'
+    ]
+  },
   verify: {
     usage: 'rewind verify <id> [options]',
     description: 'Execute the verification command for an incident to validate the fix and seal the verified-recovery record.',

@@ -13,6 +13,7 @@ import { patternsCommand } from './commands/patterns.js';
 import { contextCommand } from './commands/context.js';
 import { doctorCommand } from './commands/doctor.js';
 import { triageCommand } from './commands/triage.js';
+import { hookCommand } from './commands/hook.js';
 
 export const COMMANDS = Object.freeze({
   run: runCommand,
@@ -20,6 +21,7 @@ export const COMMANDS = Object.freeze({
   show: showCommand,
   recover: recoverCommand,
   triage: triageCommand,
+  hook: hookCommand,
   verify: verifyCommand,
   search: searchCommand,
   patterns: patternsCommand,

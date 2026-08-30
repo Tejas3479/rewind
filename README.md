@@ -334,7 +334,7 @@ rewind --version
 
 ### Running Tests
 ```bash
-# Run complete test suite (233 automated unit, integration, security, and cross-platform tests across 64 suites)
+# Run complete test suite (283 automated unit, integration, security, and cross-platform tests across 78 suites)
 npm test
 
 # Run syntax verification across all codebase files
@@ -343,7 +343,42 @@ npm run check
 
 ---
 
-## 10. End-to-End Example Workflow
+## 10. Optional Shell-Hook Integrations (`rewind hook`)
+
+Rewind includes **optional, zero-dependency shell hooks** for **Bash**, **Zsh**, and **PowerShell**. These hooks allow normal commands to execute naturally without requiring the `rewind run` prefix, while automatically capturing failures when non-zero exit codes occur.
+
+```text
+Normal Command (e.g. npm test) ──► Fails (Exit 1) ──► Shell Hook Observes
+                                                          │
+                                                          ▼
+                                                  rewind hook record
+                                                          │
+                                                          ▼
+                                              [rewind] Failure recorded as #142.
+                                              [rewind] Run: rewind triage 142
+```
+
+### Supported Shells & Installation:
+
+| Shell | Platform | One-Time Session Activation | Permanent Installation |
+| :--- | :--- | :--- | :--- |
+| **Bash** | macOS / Linux / WSL / Git Bash | `eval "$(rewind hook bash)"` | Add `eval "$(rewind hook bash)"` to `~/.bashrc` |
+| **Zsh** | macOS / Linux | `eval "$(rewind hook zsh)"` | Add `eval "$(rewind hook zsh)"` to `~/.zshrc` |
+| **PowerShell** | Windows / macOS / Linux (5.1 & 7+) | `Invoke-Expression (& rewind hook powershell \| Out-String)` | Add `Invoke-Expression (& rewind hook powershell \| Out-String)` to `$PROFILE` |
+
+### Core Safety Guarantees:
+- **100% Optional:** Rewind never modifies your shell configuration files automatically.
+- **Exit Status Preservation:** The hook strictly preserves the original exit code (`$?` / `$LASTEXITCODE`) under all conditions.
+- **Fault-Tolerant:** If Rewind encounters any error while recording, it fails silently without disrupting the user's terminal workflow.
+- **Privacy Compliant:** Uses the exact same privacy/redaction pipeline (`redactSecrets` and `captureSafeEnvironment`) as `rewind run`.
+
+### Limitations:
+- Standard shell hooks capture command line strings, exit status, and durations. Comprehensive live stdout/stderr streams are captured when using `rewind run <command...>`.
+- Does not run in non-interactive subshells or scripts (`!isTTY`).
+
+---
+
+## 11. End-to-End Example Workflow
 
 ```bash
 # 1. Run a command that fails
@@ -428,7 +463,7 @@ SEARCH RESULTS for "connection pool exhausted" (1 candidate(s))
 
 ---
 
-## 11. Zero-Dependency Guarantee
+## 12. Zero-Dependency Guarantee
 
 Rewind is strictly compliant with the **Zero Third-Party Dependency** standard:
 - **`package.json` dependencies:** `0` runtime dependencies, `0` dev dependencies.
@@ -441,7 +476,7 @@ See [`DEPENDENCY_PROOF.md`](./DEPENDENCY_PROOF.md) for automated audit verificat
 
 ---
 
-## 12. Security & Privacy Hardening
+## 13. Security & Privacy Hardening
 
 Rewind is built with privacy-by-default and terminal security:
 - **Discrete Argument Process Execution:** Spawns commands directly using argument arrays with strict `shell: false` for binaries and automatic `PATHEXT` resolution on Windows, preventing shell command injection attacks.
@@ -455,10 +490,10 @@ See [`SECURITY.md`](./SECURITY.md) for full threat model and mitigations.
 
 ---
 
-## 13. Tested Platforms & Limitations
+## 14. Tested Platforms & Limitations
 
 ### Platform Testing Matrix
-- **Windows 10 / 11 (x64):** **VERIFIED ON PLATFORM** (Full test suite of 233 tests across 64 suites passing; live CLI execution verified). Supports `.cmd`, `.bat`, and native `.exe` binary resolution.
+- **Windows 10 / 11 (x64):** **VERIFIED ON PLATFORM** (Full test suite of 283 tests across 78 suites passing; live CLI execution verified). Supports `.cmd`, `.bat`, and native `.exe` binary resolution.
 - **Linux (Ubuntu / Debian / Fedora / Alpine):** **EXPECTED TO WORK** (Standard POSIX `execve`, permissions, and signals).
 - **macOS (Darwin / Apple Silicon & Intel):** **EXPECTED TO WORK** (Standard Darwin filesystem APIs and APFS semantics).
 
@@ -468,7 +503,7 @@ See [`SECURITY.md`](./SECURITY.md) for full threat model and mitigations.
 
 ---
 
-## 14. Hackathon Scope & AI Usage Disclosure
+## 15. Hackathon Scope & AI Usage Disclosure
 
 ### Built During the Event
 The entire Rewind CLI was designed, architected, implemented, hardened, and verified during this hackathon:

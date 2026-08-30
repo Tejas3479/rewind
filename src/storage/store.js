@@ -624,7 +624,7 @@ export class StorageEngine {
       payload: {
         attemptId,
         runId,
-        command: runData.command,
+        command: runData.command || targetAttempt.verifyCmd || existing.command || '',
         exitCode: runData.exitCode,
         durationMs: runData.durationMs || 0,
         output: outputContent,

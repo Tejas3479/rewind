@@ -137,7 +137,12 @@ export function parseArgs(rawArgs = []) {
     dryRun: false,
     timeout: null,
     shell: false,
-    fixed: false
+    fixed: false,
+    cmd: null,
+    exit: null,
+    duration: null,
+    cwd: null,
+    stderr: null
   };
 
   const positional = [];
@@ -272,6 +277,75 @@ export function parseArgs(rawArgs = []) {
       i++;
     } else if (arg === '--fixed') {
       flags.fixed = true;
+      i++;
+    } else if (arg === '--cmd') {
+      i++;
+      if (i >= rawArgs.length || rawArgs[i].startsWith('-')) {
+        throw new InvalidArgumentError('Option "--cmd" requires a command string.');
+      }
+      flags.cmd = rawArgs[i];
+      i++;
+    } else if (arg.startsWith('--cmd=')) {
+      flags.cmd = arg.slice('--cmd='.length);
+      i++;
+    } else if (arg === '--exit') {
+      i++;
+      if (i >= rawArgs.length || (rawArgs[i].startsWith('-') && !/^-\d+$/.test(rawArgs[i]))) {
+        throw new InvalidArgumentError('Option "--exit" requires an integer exit code.');
+      }
+      const num = Number.parseInt(rawArgs[i], 10);
+      if (Number.isNaN(num)) {
+        throw new InvalidArgumentError(`Option "--exit" requires an integer, got "${rawArgs[i]}".`);
+      }
+      flags.exit = num;
+      i++;
+    } else if (arg.startsWith('--exit=')) {
+      const val = arg.slice('--exit='.length);
+      const num = Number.parseInt(val, 10);
+      if (!val || Number.isNaN(num)) {
+        throw new InvalidArgumentError(`Option "--exit" requires an integer, got "${val}".`);
+      }
+      flags.exit = num;
+      i++;
+    } else if (arg === '--duration') {
+      i++;
+      if (i >= rawArgs.length || (rawArgs[i].startsWith('-') && !/^-\d+$/.test(rawArgs[i]))) {
+        throw new InvalidArgumentError('Option "--duration" requires an integer (in ms).');
+      }
+      const num = Number.parseInt(rawArgs[i], 10);
+      if (Number.isNaN(num) || num < 0) {
+        throw new InvalidArgumentError(`Option "--duration" requires a non-negative integer (ms), got "${rawArgs[i]}".`);
+      }
+      flags.duration = num;
+      i++;
+    } else if (arg.startsWith('--duration=')) {
+      const val = arg.slice('--duration='.length);
+      const num = Number.parseInt(val, 10);
+      if (!val || Number.isNaN(num) || num < 0) {
+        throw new InvalidArgumentError(`Option "--duration" requires a non-negative integer (ms), got "${val}".`);
+      }
+      flags.duration = num;
+      i++;
+    } else if (arg === '--cwd') {
+      i++;
+      if (i >= rawArgs.length || rawArgs[i].startsWith('-')) {
+        throw new InvalidArgumentError('Option "--cwd" requires a directory path.');
+      }
+      flags.cwd = rawArgs[i];
+      i++;
+    } else if (arg.startsWith('--cwd=')) {
+      flags.cwd = arg.slice('--cwd='.length);
+      i++;
+    } else if (arg === '--stderr') {
+      i++;
+      if (i >= rawArgs.length) {
+        flags.stderr = '';
+      } else {
+        flags.stderr = rawArgs[i];
+        i++;
+      }
+    } else if (arg.startsWith('--stderr=')) {
+      flags.stderr = arg.slice('--stderr='.length);
       i++;
     } else if (arg.startsWith('-')) {
       throw new InvalidArgumentError(`Unknown option: "${arg}". Run "rewind --help" for usage.`);
