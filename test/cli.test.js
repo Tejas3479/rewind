@@ -1,5 +1,8 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { runCLI } from '../src/cli.js';
 import { ExitCodes } from '../src/errors.js';
 
@@ -224,5 +227,24 @@ describe('CLI Integration & Behaviors (src/cli.js)', () => {
     const code2 = await runCLI(['run', '--shell', `"${process.execPath}" -e "console.log('shell_postfix')"`], mock2.io);
     assert.equal(code2, 0);
     assert.ok(mock2.getStdout().includes('shell_postfix'));
+  });
+
+  test('rewind run tolerates storage persistence failure and preserves child exit code', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rewind-failstore-test-'));
+    try {
+      const ledgerPath = path.join(tmpDir, '.rewind');
+      fs.mkdirSync(ledgerPath, { recursive: true });
+      // Corrupt journal.jsonl by creating it as a directory so init succeeds but appendJournalEvent / write fails
+      fs.mkdirSync(path.join(ledgerPath, 'journal.jsonl'), { recursive: true });
+
+      const mock = createMockIO({ cwd: tmpDir });
+      const exitCode = await runCLI(['--root', tmpDir, 'run', process.execPath, '-e', 'console.error("child_err_19"); process.exit(19);'], mock.io);
+
+      assert.equal(exitCode, 19);
+      assert.ok(mock.getStderr().includes('child_err_19'));
+      assert.ok(mock.getStderr().includes('[rewind:warning]'));
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 });
