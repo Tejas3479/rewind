@@ -16,17 +16,34 @@ REWIND is designed with strict security, privacy, and threat-mitigation principl
 
 | Threat Vector | Mitigation Strategy |
 | :--- | :--- |
-| **Path Traversal Attacks** | Strict integer validation (`/^\d+$/`) on all incident IDs. Absolute path resolution with `path.resolve()` on root ledger options. Null-byte rejection. |
-| **Terminal ANSI Injection** | All captured `stdout`/`stderr` text is treated as untrusted evidence. ANSI color escapes, OSC hyperlinks, cursor movements, and control sequences are stripped at display time. |
-| **Resource Exhaustion (DoS)** | Memory buffer capped at 10MB per stream (`MAX_BUFFER_BYTES`) during process capture to prevent heap overflow from infinite logging loops. |
-| **Secret & Credential Leakage** | Conservative regex redaction for API keys (OpenAI, GitHub, AWS, Slack), PEM private key headers, Bearer tokens, Basic Auth URLs, and password parameters. Environment variables are captured as names only (with strict allowlist for `NODE_ENV`, `CI`, `LANG`, `TZ`). |
+| **Command Injection in Execution** | Arguments are passed as discrete argument arrays directly to `node:child_process.spawn` with `shell: false`. No string concatenation into implicit shell strings. Metacharacters (`|`, `;`, `&`, `$()`, `>`, `<`) are treated as literal strings. |
+| **Path Traversal Attacks** | Strict integer validation (`/^\d+$/`) on all incident IDs. Absolute path resolution with `path.resolve()` on root ledger options. Null-byte and relative traversal patterns (`../`) rejected fail-closed. |
+| **Terminal ANSI & Title Attacks** | All captured `stdout`/`stderr` text is treated as untrusted evidence. ANSI color escapes, OSC window title sequences, cursor jump sequences, control characters, and trailing orphan escape bytes are stripped before display (`sanitizeForDisplay()`). |
+| **Terminal Line Overwrite Spoofing** | Carriage-return sequences (`\r\n`, `\r`) are normalized to `\n` at the display boundary to neutralize terminal line overwrite spoofing attacks. |
+| **Resource Exhaustion (DoS)** | Memory buffer capped at 10MB per stream (`MAX_BUFFER_BYTES`) during process capture to prevent heap overflow from infinite logging loops. Extremely long lines (100,000+ chars) handled safely. |
+| **Orphaned Child Processes** | Parent-to-child signal forwarding (`SIGINT`, `SIGTERM`) ensures child processes are cleanly terminated when the CLI exits or times out. |
+| **Secret & Credential Leakage** | Conservative regex redaction for API keys (OpenAI, GitHub, AWS, Slack), PEM private key headers, Bearer tokens, Basic Auth URLs, and password parameters. Environment variables are captured as names only (with strict allowlist for `NODE_ENV`, `CI`, `LANG`, `TZ`). Raw secrets never persisted. |
 | **Command Injection in Fixes** | Rewind **never** automatically executes historical recovery commands. Verification commands execute ONLY through explicit user initiation (`rewind verify <id>`). |
-| **Corrupt / Malicious Records** | Schema-invalid or malformed JSON records are automatically quarantined into `.rewind/quarantine/` without crashing the CLI. |
-| **File Permissions** | Ledger directories and record files are written with restrictive `0o700` and `0o600` permissions (readable/writable only by current user). |
+| **Corrupt / Malicious Records** | Schema-invalid or malformed JSON records are automatically quarantined into `.rewind/quarantine/` without crashing the CLI. Authoritative `journal.jsonl` is immutable. |
+| **File Permissions & Concurrency** | Storage directories use `0o700` and record files use `0o600` file permissions. Exclusive lock file (`journal.lock`) with PID liveness verification prevents concurrent append corruption. |
 
 ---
 
-## 3. Secret Redaction Limitations
+## 3. Process Execution & Cross-Platform Invariants
+
+1. **Strict Argument-Array Execution:**
+   - In `src/capture.js`, execution tokens are separated into `[executable, ...args]`.
+   - On POSIX systems, `spawn(executable, args, { shell: false })` invokes `execve` directly without invoking `/bin/sh` or `/bin/bash`.
+   - On Windows, `resolveExecutable` inspects `PATH` and `PATHEXT`. If a Windows batch script (`.cmd` or `.bat`) is targeted, it applies quotes to paths containing spaces under Node's security model (CVE-2024-27980); native `.exe` binaries execute with `shell: false`.
+2. **Signal Forwarding & Standard Exit Codes:**
+   - Termination signals are mapped to standard POSIX `128+N` codes (`SIGINT` = 130, `SIGTERM` = 143, `SIGKILL` = 137).
+   - Execution timeouts (`--timeout`) are recorded as distinct events with `timedOut: true` rather than masquerading as clean command failure.
+3. **Display Boundary Sanitization:**
+   - Raw logs are preserved unaltered in `.rewind/evidence/` with SHA-256 evidence hashing for forensic authenticity. Sanitization is performed strictly at the terminal rendering boundary.
+
+---
+
+## 4. Secret Redaction Limitations
 
 Rewind applies conservative pattern matching for common secret formats (e.g., standard API token prefixes, PEM headers, URL credentials). 
 
@@ -34,6 +51,6 @@ Rewind applies conservative pattern matching for common secret formats (e.g., st
 
 ---
 
-## 4. Reporting Security Vulnerabilities
+## 5. Reporting Security Vulnerabilities
 
 To report a vulnerability, please open a private GitHub security advisory on the repository.

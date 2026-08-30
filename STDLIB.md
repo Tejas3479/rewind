@@ -70,9 +70,9 @@ This document details every third-party package normally used for these features
 ### 8. Storage Engine & Database
 
 * **Normally:** `sqlite3`, `better-sqlite3`, `level`, or `lowdb`
-* **Rewind uses:** Directory-based immutable JSON records in `.rewind/records/<id>.json` managed with crash-safe atomic writes (`write tmp` $\rightarrow$ `fsyncSync` $\rightarrow$ atomic `renameSync`).
+* **Rewind uses:** Append-only authoritative event journal (`.rewind/journal.jsonl`) with trusted cryptographic checkpointing (`.rewind/checkpoint.json`), derived in-memory indices, and disposable incident projections (`.rewind/records/<id>.json`) managed with crash-safe atomic writes (`write tmp` $\rightarrow$ `fsyncSync` $\rightarrow$ `safeAtomicRenameSync`).
 * **Why:** Provides a transparent, inspectable, human-readable local ledger that requires zero C++ native addons or external database server processes. Corrupt records are isolated into `.rewind/quarantine/` with automatic startup index rebuilds.
-* **Actual Code Location:** [`src/storage/store.js`](./src/storage/store.js)
+* **Actual Code Location:** [`src/storage/store.js`](./src/storage/store.js), [`src/storage/journal.js`](./src/storage/journal.js), [`src/storage/projection.js`](./src/storage/projection.js)
 
 ---
 
@@ -85,9 +85,18 @@ This document details every third-party package normally used for these features
 
 ---
 
-### 10. Automated Testing Framework
+### 10. Self-Diagnostics & System Health Audit
+
+* **Normally:** Custom diagnostic scripts or external health-check tools (`doctor-cli`, `diagnostics`)
+* **Rewind uses:** Pure Node.js 15-point diagnostic and constrained safe-repair engine verifying directory accessibility, writer locks, syntax, hash chains, projections, secret redaction, and storage size without symlink traversal.
+* **Why:** Enables users and automated scripts to instantly verify ledger integrity and installation health with zero dependencies.
+* **Actual Code Location:** [`src/storage/doctor.js`](./src/storage/doctor.js), [`src/commands/doctor.js`](./src/commands/doctor.js)
+
+---
+
+### 11. Automated Testing Framework
 
 * **Normally:** `jest`, `mocha`, `vitest`, or `chai`
 * **Rewind uses:** Native Node.js test runner (`node:test`) and assertion module (`node:assert/strict`).
-* **Why:** Comprehensive unit, integration, and security testing (130 test cases across 28 test suites) executed directly with `node --test` without installing any test framework dependencies.
+* **Why:** Comprehensive unit, integration, security, and cross-platform testing (228 test cases across 64 test suites) executed directly with `node --test` without installing any test framework dependencies.
 * **Actual Code Location:** [`test/*.test.js`](./test/)
