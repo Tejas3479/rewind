@@ -120,6 +120,8 @@ export function projectEventsToRecords(events = []) {
           verifyCmdProvenance: payload.verifyCmd ? (payload.verifyCmdProvenance || ProvenanceType.USER_REPORTED) : null,
           observedChanges: payload.observedChanges || null,
           status,
+          isExternal: Boolean(payload.isExternal),
+          externalVerification: payload.externalVerification || null,
           evidenceQuality: quality,
           verificationRuns: []
         };
@@ -203,6 +205,9 @@ export function projectEventsToRecords(events = []) {
 
           targetAttempt.status = isPassed ? RecoveryAttemptStatus.VERIFIED : RecoveryAttemptStatus.FAILED;
           targetAttempt.evidenceQuality = isPassed ? EvidenceQuality.DIRECT : EvidenceQuality.DIRECT;
+          if (isPassed) {
+            targetAttempt.isExternal = false;
+          }
           targetAttempt.verificationRuns = [...currentRuns, newRun];
           currentAttempts[attemptIndex] = targetAttempt;
 

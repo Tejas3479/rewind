@@ -248,6 +248,8 @@ export function normalizeRecordToCurrentSchema(record) {
       verifyCmdProvenance: attempt.verifyCmdProvenance || (attempt.verifyCmd ? ProvenanceType.USER_REPORTED : null),
       observedChanges: attempt.observedChanges || null,
       status: attempt.status || RecoveryAttemptStatus.PROPOSED,
+      isExternal: Boolean(attempt.isExternal),
+      externalVerification: attempt.externalVerification || null,
       evidenceQuality: quality,
       verificationRuns: runs
     };

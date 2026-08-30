@@ -14,6 +14,8 @@ import { contextCommand } from './commands/context.js';
 import { doctorCommand } from './commands/doctor.js';
 import { triageCommand } from './commands/triage.js';
 import { hookCommand } from './commands/hook.js';
+import { exportSharedCommand } from './commands/export_shared.js';
+import { importSharedCommand } from './commands/import_shared.js';
 
 export const COMMANDS = Object.freeze({
   run: runCommand,
@@ -22,6 +24,12 @@ export const COMMANDS = Object.freeze({
   recover: recoverCommand,
   triage: triageCommand,
   hook: hookCommand,
+  'export-shared': exportSharedCommand,
+  export_shared: exportSharedCommand,
+  export: exportSharedCommand,
+  'import-shared': importSharedCommand,
+  import_shared: importSharedCommand,
+  import: importSharedCommand,
   verify: verifyCommand,
   search: searchCommand,
   patterns: patternsCommand,

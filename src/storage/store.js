@@ -418,7 +418,7 @@ export class StorageEngine {
     let initialState = options.initialState;
     let regressionOf = options.regressionOf || null;
 
-    const { fingerprint, normalizedError } = computeFingerprint({
+    const computed = computeFingerprint({
       command: captureResult.command || '',
       args: captureResult.args || [],
       exitCode: captureResult.exitCode,
@@ -426,6 +426,8 @@ export class StorageEngine {
       stderr: captureResult.stderr || '',
       stdout: captureResult.stdout || ''
     });
+    const fingerprint = captureResult.fingerprint || computed.fingerprint;
+    const normalizedError = captureResult.normalizedError || computed.normalizedError;
 
     if (!captureResult.success && !initialState) {
       const priorVerified = this.findVerifiedByFingerprint(fingerprint);
@@ -528,9 +530,11 @@ export class StorageEngine {
         verifyCmd: attemptData.verifyCmd || null,
         verifyCmdProvenance: attemptData.verifyCmd ? (attemptData.verifyCmdProvenance || ProvenanceType.USER_REPORTED) : null,
         isFixed,
-        status: initialStatus,
+        status: attemptData.status || initialStatus,
+        isExternal: Boolean(attemptData.isExternal),
+        externalVerification: attemptData.externalVerification || null,
         observedChanges: attemptData.observedChanges || null,
-        evidenceQuality: quality
+        evidenceQuality: attemptData.evidenceQuality || quality
       }
     });
 

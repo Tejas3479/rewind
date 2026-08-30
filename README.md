@@ -334,7 +334,7 @@ rewind --version
 
 ### Running Tests
 ```bash
-# Run complete test suite (283 automated unit, integration, security, and cross-platform tests across 78 suites)
+# Run complete test suite (293 automated unit, integration, security, and cross-platform tests across 84 suites)
 npm test
 
 # Run syntax verification across all codebase files
@@ -378,7 +378,33 @@ Normal Command (e.g. npm test) ──► Fails (Exit 1) ──► Shell Hook Obs
 
 ---
 
-## 11. End-to-End Example Workflow
+## 11. Project-Level Shared Recovery Bundles (`rewind export-shared` & `import-shared`)
+
+Rewind allows verified recovery knowledge to be safely exported into portable, sanitized bundle artifacts for team collaboration **without touching Git** or invoking external tools.
+
+```text
+Developer A: Verified Fix ──► rewind export-shared -o shared-recovery.json (Sanitized & Redacted)
+                                                   │
+                                     git commit & push bundle file
+                                                   │
+                                                   ▼
+Developer B: git pull ────► rewind import-shared shared-recovery.json
+                                                   │
+                                                   ▼
+                             [Attempt #1] VERIFIED (EXTERNAL EVIDENCE)
+                                                   │
+                             rewind verify <id> ──► Promotes to VERIFIED LOCALLY!
+```
+
+### Key Principles & Trust Model:
+- **No Git Invocations:** Rewind never calls `git`. The developer explicitly controls committing, pushing, and pulling file artifacts.
+- **Sanitization & Redaction:** Machine-specific absolute paths (`/Users/alice/...`, `C:\Users\bob\...`) are replaced with `<WORKSPACE_ROOT>`, secrets are redacted, and private environment identifiers are stripped.
+- **Preserved Diagnostics & Provenance:** Language diagnostics, error codes, failure fingerprints, and verified proof are fully preserved.
+- **Explicit Trust Boundary:** Imported verified fixes are marked **`VERIFIED — EXTERNAL EVIDENCE`** (Quality: `SUPPORTED`) until the local developer runs `rewind verify <id>` to re-verify on their machine.
+
+---
+
+## 12. End-to-End Example Workflow
 
 ```bash
 # 1. Run a command that fails
@@ -463,7 +489,7 @@ SEARCH RESULTS for "connection pool exhausted" (1 candidate(s))
 
 ---
 
-## 12. Zero-Dependency Guarantee
+## 13. Zero-Dependency Guarantee
 
 Rewind is strictly compliant with the **Zero Third-Party Dependency** standard:
 - **`package.json` dependencies:** `0` runtime dependencies, `0` dev dependencies.
@@ -476,7 +502,7 @@ See [`DEPENDENCY_PROOF.md`](./DEPENDENCY_PROOF.md) for automated audit verificat
 
 ---
 
-## 13. Security & Privacy Hardening
+## 14. Security & Privacy Hardening
 
 Rewind is built with privacy-by-default and terminal security:
 - **Discrete Argument Process Execution:** Spawns commands directly using argument arrays with strict `shell: false` for binaries and automatic `PATHEXT` resolution on Windows, preventing shell command injection attacks.
@@ -490,10 +516,10 @@ See [`SECURITY.md`](./SECURITY.md) for full threat model and mitigations.
 
 ---
 
-## 14. Tested Platforms & Limitations
+## 15. Tested Platforms & Limitations
 
 ### Platform Testing Matrix
-- **Windows 10 / 11 (x64):** **VERIFIED ON PLATFORM** (Full test suite of 283 tests across 78 suites passing; live CLI execution verified). Supports `.cmd`, `.bat`, and native `.exe` binary resolution.
+- **Windows 10 / 11 (x64):** **VERIFIED ON PLATFORM** (Full test suite of 293 tests across 84 suites passing; live CLI execution verified). Supports `.cmd`, `.bat`, and native `.exe` binary resolution.
 - **Linux (Ubuntu / Debian / Fedora / Alpine):** **EXPECTED TO WORK** (Standard POSIX `execve`, permissions, and signals).
 - **macOS (Darwin / Apple Silicon & Intel):** **EXPECTED TO WORK** (Standard Darwin filesystem APIs and APFS semantics).
 
@@ -503,7 +529,7 @@ See [`SECURITY.md`](./SECURITY.md) for full threat model and mitigations.
 
 ---
 
-## 15. Hackathon Scope & AI Usage Disclosure
+## 16. Hackathon Scope & AI Usage Disclosure
 
 ### Built During the Event
 The entire Rewind CLI was designed, architected, implemented, hardened, and verified during this hackathon:

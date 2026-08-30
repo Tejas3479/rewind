@@ -106,6 +106,42 @@ const COMMAND_DOCS = {
       'rewind hook powershell'
     ]
   },
+  'export-shared': {
+    usage: 'rewind export-shared [options]',
+    description: 'Export verified recovery knowledge into a sanitized, portable shared recovery bundle for team collaboration.',
+    arguments: [],
+    options: [
+      { flag: '--output <path>, -o <path>', description: 'Destination bundle file path (default: shared-recovery.json)' },
+      { flag: '--include-unverified', description: 'Include unverified recovery proposals and open incidents' },
+      { flag: '--json', description: 'Output export summary as machine-readable JSON' },
+      { flag: '--no-color', description: 'Disable ANSI color formatting' },
+      { flag: '--root <path>', description: 'Explicit project root / ledger directory' }
+    ],
+    examples: [
+      'rewind export-shared',
+      'rewind export-shared -o shared-recovery.json',
+      'rewind export-shared --include-unverified'
+    ]
+  },
+  'import-shared': {
+    usage: 'rewind import-shared [file] [options]',
+    description: 'Import recovery knowledge from a shared recovery bundle into local ledger as external evidence.',
+    arguments: [
+      { name: '[file]', description: 'Path to shared recovery bundle file (default: shared-recovery.json)' }
+    ],
+    options: [
+      { flag: '--dry-run', description: 'Preview bundle contents without modifying the local ledger' },
+      { flag: '--overwrite', description: 'Force overwrite existing duplicate records' },
+      { flag: '--json', description: 'Output import summary as machine-readable JSON' },
+      { flag: '--no-color', description: 'Disable ANSI color formatting' },
+      { flag: '--root <path>', description: 'Explicit project root / ledger directory' }
+    ],
+    examples: [
+      'rewind import-shared shared-recovery.json',
+      'rewind import-shared --dry-run',
+      'rewind import-shared shared-recovery.json --json'
+    ]
+  },
   verify: {
     usage: 'rewind verify <id> [options]',
     description: 'Execute the verification command for an incident to validate the fix and seal the verified-recovery record.',

@@ -146,8 +146,17 @@ export async function showCommand({ context }) {
     for (const att of attempts) {
       const attBadge = formatStatusBadge(att.status, s);
       const qualityTag = att.evidenceQuality ? s.dim(`[Quality: ${att.evidenceQuality}]`) : '';
-      const fixedTag = att.status === 'FIXED' ? s.yellow(' (User Claim — Unverified)') : '';
+      const fixedTag = att.status === 'FIXED'
+        ? s.yellow(' (User Claim — Unverified)')
+        : att.isExternal
+          ? s.cyan(' (External Evidence — Unverified Locally)')
+          : '';
       stdout.write(`  ${s.bold(`[Attempt #${att.id}]`)} ${attBadge}${fixedTag} ${qualityTag} ${s.dim(`(${formatUtc(att.createdAt)})`)}\n`);
+
+      if (att.isExternal) {
+        stdout.write(`    ${s.dim('Source:'.padEnd(26))} ${s.dim('Imported from shared recovery bundle')}\n`);
+        stdout.write(`    ${s.dim('Local Verification:'.padEnd(26))} ${s.yellow(`Run "rewind verify ${record.id}" to verify locally on this machine`)}\n`);
+      }
 
       if (att.cause) {
         stdout.write(`    ${s.dim('[USER CLAIM] Hypothesis:'.padEnd(26))} ${sanitizeForDisplay(att.cause)}\n`);

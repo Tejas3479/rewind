@@ -142,7 +142,10 @@ export function parseArgs(rawArgs = []) {
     exit: null,
     duration: null,
     cwd: null,
-    stderr: null
+    stderr: null,
+    output: null,
+    includeUnverified: false,
+    overwrite: false
   };
 
   const positional = [];
@@ -346,6 +349,26 @@ export function parseArgs(rawArgs = []) {
       }
     } else if (arg.startsWith('--stderr=')) {
       flags.stderr = arg.slice('--stderr='.length);
+      i++;
+    } else if (arg === '--output' || arg === '-o') {
+      i++;
+      if (i >= rawArgs.length || rawArgs[i].startsWith('-')) {
+        throw new InvalidArgumentError('Option "--output" requires a file path argument.');
+      }
+      flags.output = rawArgs[i];
+      i++;
+    } else if (arg.startsWith('--output=')) {
+      const val = arg.slice('--output='.length);
+      if (!val) {
+        throw new InvalidArgumentError('Option "--output" requires a file path argument.');
+      }
+      flags.output = val;
+      i++;
+    } else if (arg === '--include-unverified' || arg === '--all') {
+      flags.includeUnverified = true;
+      i++;
+    } else if (arg === '--overwrite') {
+      flags.overwrite = true;
       i++;
     } else if (arg.startsWith('-')) {
       throw new InvalidArgumentError(`Unknown option: "${arg}". Run "rewind --help" for usage.`);
