@@ -1,6 +1,12 @@
-.PHONY: all test check proof run help
+.PHONY: all test check proof run build verify-build help
 
 all: test
+
+build:
+	node scripts/build.js
+
+verify-build:
+	node --test test/build.test.js
 
 test:
 	node --test
@@ -12,7 +18,7 @@ proof:
 	@echo "Checking runtime dependencies..."
 	@node -e "console.log('Dependencies:', require('./package.json').dependencies);"
 	@echo "Running test suite..."
-	node --test
+	@node --test
 
 run:
 	node bin/rewind.js help

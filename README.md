@@ -44,7 +44,7 @@ node bin/rewind.js patterns --explain
 # 10. Query structured forensic context for coding agents
 node bin/rewind.js context latest --json
 
-# 11. Run the complete automated test suite (309 tests across 89 suites, 0 dependencies)
+# 11. Run the complete automated test suite (313 tests across 90 suites, 0 dependencies)
 npm test
 
 # 12. Audit cryptographic integrity of the local ledger

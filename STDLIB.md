@@ -125,7 +125,7 @@ Rewind replaces an entire modern Node.js CLI toolchain with **100% standard libr
 ### 13. Automated Testing Framework
 * **Normally:** `jest`, `mocha`, `vitest`, or `chai`
 * **Rewind uses:** Native Node.js test runner (`node:test`) and assertion module (`node:assert/strict`).
-* **Why:** Comprehensive unit, integration, security, and cross-platform testing (309 test cases across 89 test suites) executed directly with `node --test` without installing any test framework dependencies.
+* **Why:** Comprehensive unit, integration, security, and cross-platform testing (313 test cases across 90 test suites) executed directly with `node --test` without installing any test framework dependencies.
 * **Actual Code Location:** [`test/*.test.js`](./test/)
 
 ---

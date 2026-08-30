@@ -25,6 +25,12 @@ Every source file strictly uses node:* built-in modules or relative project file
 
 4. Test suite run (zero dependencies installed):
 $ node --test
-✔ 34 test files passed
-✔ 309 tests passed
+✔ 35 test files passed
+✔ 313 tests passed
 ✔ 0 failures, 0 skipped, 0 cancelled
+
+5. Reproducible Build Determinism:
+$ node scripts/build.js
+✔ Pass #1 SHA-256: 42b91576a90a5e77b91c40c5504bf7573685b5ed8bdda23d1809a5edba1047b4 (439644 bytes)
+✔ Pass #2 SHA-256: 42b91576a90a5e77b91c40c5504bf7573685b5ed8bdda23d1809a5edba1047b4 (439644 bytes)
+✔ DETERMINISM VERIFIED: 100% Byte-for-byte identical output across independent runs.
