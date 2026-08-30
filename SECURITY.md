@@ -24,6 +24,8 @@ REWIND is designed with strict security, privacy, and threat-mitigation principl
 | **Orphaned Child Processes** | Parent-to-child signal forwarding (`SIGINT`, `SIGTERM`) ensures child processes are cleanly terminated when the CLI exits or times out. |
 | **Secret & Credential Leakage** | Conservative regex redaction for API keys (OpenAI, GitHub, AWS, Slack), PEM private key headers, Bearer tokens, Basic Auth URLs, and password parameters. Environment variables are captured as names only (with strict allowlist for `NODE_ENV`, `CI`, `LANG`, `TZ`). Raw secrets never persisted. |
 | **Command Injection in Fixes** | Rewind **never** automatically executes historical recovery commands. Verification commands execute ONLY through explicit user initiation (`rewind verify <id>`). |
+| **Shell Hook Side-Effects** | Shell hooks are purely passive observers. The original exit code (`$?` / `$LASTEXITCODE`) is strictly preserved under all conditions. All hook failures are silenced (`catch {}` / `2>/dev/null`) to guarantee user terminal workflows are never interrupted. |
+| **Shared Recovery Bundle Poisoning** | Imported bundles are **never automatically trusted locally**. Imported verified fixes are explicitly marked `VERIFIED — EXTERNAL EVIDENCE` (Quality: `SUPPORTED`) until explicitly re-verified locally by running `rewind verify <id>`. Machine-specific paths and local identifiers are stripped before export. |
 | **Corrupt / Malicious Records** | Schema-invalid or malformed JSON records are automatically quarantined into `.rewind/quarantine/` without crashing the CLI. Authoritative `journal.jsonl` is immutable. |
 | **File Permissions & Concurrency** | Storage directories use `0o700` and record files use `0o600` file permissions. Exclusive lock file (`journal.lock`) with PID liveness verification prevents concurrent append corruption. |
 
@@ -40,6 +42,9 @@ REWIND is designed with strict security, privacy, and threat-mitigation principl
    - Execution timeouts (`--timeout`) are recorded as distinct events with `timedOut: true` rather than masquerading as clean command failure.
 3. **Display Boundary Sanitization:**
    - Raw logs are preserved unaltered in `.rewind/evidence/` with SHA-256 evidence hashing for forensic authenticity. Sanitization is performed strictly at the terminal rendering boundary.
+4. **Shell Hook & Sharing Invariants:**
+   - Shell hooks never rewrite or replace the user's shell, and never run in non-interactive sessions (`!isTTY`).
+   - Bundle exports scrub absolute user paths (`/Users/alice/...`, `C:\Users\bob\...`), machine IDs, and unallowlisted environment keys before writing shareable files. No `git` CLI executable is ever invoked.
 
 ---
 

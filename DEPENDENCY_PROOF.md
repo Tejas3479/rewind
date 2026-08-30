@@ -53,6 +53,8 @@ Every single import in the codebase maps to:
 - `node:child_process`
 - `node:crypto`
 - `node:os`
+- `node:stream`
+- `node:readline`
 - Relative files (`./*.js`, `../*.js`)
 
 ---
@@ -84,9 +86,9 @@ node --test
 
 **Expected Output:**
 ```text
-# tests 249
-# suites 65
-# pass 249
+# tests 293
+# suites 84
+# pass 293
 # fail 0
 # cancelled 0
 # skipped 0

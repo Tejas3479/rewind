@@ -33,6 +33,8 @@ The **Agent-Consumption Interface** allows autonomous and interactive coding age
 | `rewind doctor --json` | `stdout` | Complete 15-check ledger health, storage consistency, and diagnostics report |
 | `rewind patterns --json` | `stdout` | Empirical failure family patterns (flakiness, regressions, environment skews) |
 | `rewind verify-integrity --json` | `stdout` | Read-only 4-layer cryptographic ledger integrity audit |
+| `rewind export-shared --json` | `stdout` | Export sanitized verified recovery knowledge bundle for sharing |
+| `rewind import-shared <file> --json` | `stdout` | Import shared recovery bundle as external evidence |
 
 ---
 

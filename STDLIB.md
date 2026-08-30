@@ -107,5 +107,32 @@ This document details every third-party package normally used for these features
 
 * **Normally:** `jest`, `mocha`, `vitest`, or `chai`
 * **Rewind uses:** Native Node.js test runner (`node:test`) and assertion module (`node:assert/strict`).
-* **Why:** Comprehensive unit, integration, security, and cross-platform testing (249 test cases across 65 test suites) executed directly with `node --test` without installing any test framework dependencies.
+* **Why:** Comprehensive unit, integration, security, and cross-platform testing (293 test cases across 84 test suites) executed directly with `node --test` without installing any test framework dependencies.
 * **Actual Code Location:** [`test/*.test.js`](./test/)
+
+---
+
+### 13. Interactive Recovery Triage Wizard
+
+* **Normally:** `inquirer`, `enquirer`, or `prompts`
+* **Rewind uses:** `node:readline` and pure functional state machine (`src/triage/engine.js`).
+* **Why:** Guided 7-step interactive wizard prompting for suspected cause, remediation fix, and verification command, with non-interactive terminal guards (`!isTTY`) and headless testability.
+* **Actual Code Location:** [`src/triage/engine.js`](./src/triage/engine.js), [`src/commands/triage.js`](./src/commands/triage.js)
+
+---
+
+### 14. Shell Integrations & Passive Hook Capture
+
+* **Normally:** Binary wrappers, shell proxies, or background daemons
+* **Rewind uses:** Lightweight pure shell script templates for Bash (`trap DEBUG` + `PROMPT_COMMAND`), Zsh (`add-zsh-hook`), and PowerShell (`global:prompt`).
+* **Why:** 100% optional, non-intrusive terminal failure observation that preserves the command's original exit status (`$?` / `$LASTEXITCODE`) and redacts secrets with zero shell replacement.
+* **Actual Code Location:** [`src/hooks/templates.js`](./src/hooks/templates.js), [`src/commands/hook.js`](./src/commands/hook.js)
+
+---
+
+### 15. Project-Level Shared Recovery Bundles
+
+* **Normally:** Remote database sync, cloud APIs, or invoking `git` CLI subprocesses
+* **Rewind uses:** Pure `node:fs` and `node:crypto` JSON bundle export/import with machine path stripping (`stripMachinePaths`), secret redaction, and external evidence provenance tagging (`VERIFIED — EXTERNAL EVIDENCE`).
+* **Why:** Allows developers to safely export, commit, pull, and share verified remediation knowledge without touching Git, running daemons, or compromising local verification trust.
+* **Actual Code Location:** [`src/sharing/bundle.js`](./src/sharing/bundle.js), [`src/commands/export_shared.js`](./src/commands/export_shared.js), [`src/commands/import_shared.js`](./src/commands/import_shared.js)
