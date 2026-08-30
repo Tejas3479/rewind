@@ -1,9 +1,13 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
+import path from 'node:path';
+import fs from 'node:fs';
+import os from 'node:os';
 import { runCLI } from '../src/cli.js';
-import { redactSecrets, sanitizeOutput } from '../src/sanitizer.js';
+import { redactSecrets, sanitizeOutput, stripAnsi } from '../src/sanitizer.js';
 import { captureSafeEnvironment } from '../src/environment.js';
-import { executeAndCapture } from '../src/capture.js';
+import { executeAndCapture, mapSignalToExitCode } from '../src/capture.js';
+import { tokenizeCommandLine } from '../src/parser.js';
 
 function createMockIO({ env = {}, isTTY = false, cwd = process.cwd() } = {}) {
   let stdoutData = '';
@@ -37,29 +41,143 @@ function createMockIO({ env = {}, isTTY = false, cwd = process.cwd() } = {}) {
   };
 }
 
-describe('Security & Privacy Hardening (test/security.test.js)', () => {
-  describe('Path Traversal & ID Sanitization', () => {
-    test('rejects path traversal attempts in show command', async () => {
-      const mock1 = createMockIO();
-      const code1 = await runCLI(['show', '../../etc/passwd'], mock1.io);
-      assert.equal(code1, 1);
-      assert.ok(mock1.getStderr().includes('Incident #../../etc/passwd not found in ledger'));
+describe('Security & Command Execution Safety Audit (test/security.test.js)', () => {
+  describe('Command Injection & Argument Boundary Immunity', () => {
+    test('does not execute shell metacharacters in arguments (pipes, semicolons, redirections)', async () => {
+      // If shell: true were used, this would execute subcommands or redirect output.
+      // With argument-array execution (shell: false), Node passes the arguments verbatim to the executable.
+      const payload = 'foo; echo INJECTED_SEMICOLON | echo INJECTED_PIPE > /tmp/injected_file && calc.exe';
+      const result = await executeAndCapture([
+        process.execPath,
+        '-e',
+        'console.log(process.argv[1])',
+        payload
+      ]);
 
-      const mock2 = createMockIO();
-      const code2 = await runCLI(['show', '1/../../../etc'], mock2.io);
-      assert.equal(code2, 1);
+      assert.equal(result.success, true);
+      assert.equal(result.exitCode, 0);
+      assert.ok(result.stdout.includes(payload));
     });
 
-    test('rejects path traversal attempts in recover command', async () => {
-      const mock = createMockIO();
-      const code = await runCLI(['recover', '../../1', '--cause', 'hack'], mock.io);
-      assert.equal(code, 1);
+    test('preserves arguments containing spaces without splitting', async () => {
+      const argWithSpaces = 'arg with multiple embedded spaces and tabs\t';
+      const result = await executeAndCapture([
+        process.execPath,
+        '-e',
+        'console.log(JSON.stringify(process.argv.slice(1)))',
+        argWithSpaces
+      ]);
+
+      assert.equal(result.success, true);
+      const parsedArgs = JSON.parse(result.stdout.trim());
+      assert.equal(parsedArgs.length, 1);
+      assert.equal(parsedArgs[0], argWithSpaces);
     });
 
-    test('rejects path traversal attempts in verify command', async () => {
-      const mock = createMockIO();
-      const code = await runCLI(['verify', '../1'], mock.io);
-      assert.equal(code, 1);
+    test('preserves quotes and apostrophes in argument values', async () => {
+      const quotedArg = '"double quotes" and \'single quotes\' and `backticks`';
+      const result = await executeAndCapture([
+        process.execPath,
+        '-e',
+        'console.log(process.argv[1])',
+        quotedArg
+      ]);
+
+      assert.equal(result.success, true);
+      assert.ok(result.stdout.includes(quotedArg));
+    });
+
+    test('preserves full Unicode, emojis, and multilingual text in arguments', async () => {
+      const unicodeArg = '日本語テキスト 🚀 測試 Unicode ää öö üü 💖 \u00A0 \u200B';
+      const result = await executeAndCapture([
+        process.execPath,
+        '-e',
+        'console.log(process.argv[1])',
+        unicodeArg
+      ]);
+
+      assert.equal(result.success, true);
+      assert.ok(result.stdout.includes('日本語テキスト'));
+      assert.ok(result.stdout.includes('🚀'));
+      assert.ok(result.stdout.includes('測試'));
+    });
+
+    test('preserves empty string arguments at beginning, middle, and end', async () => {
+      const result = await executeAndCapture([
+        process.execPath,
+        '-e',
+        'console.log(JSON.stringify(process.argv.slice(1)))',
+        '',
+        'middle-arg',
+        ''
+      ]);
+
+      assert.equal(result.success, true);
+      const parsed = JSON.parse(result.stdout.trim());
+      assert.equal(parsed.length, 3);
+      assert.equal(parsed[0], '');
+      assert.equal(parsed[1], 'middle-arg');
+      assert.equal(parsed[2], '');
+    });
+
+    test('executes cleanly in directories containing spaces', async () => {
+      const tempSpaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rewind space test-'));
+      try {
+        const result = await executeAndCapture([
+          process.execPath,
+          '-e',
+          'console.log(process.cwd())'
+        ], { cwd: tempSpaceDir });
+
+        assert.equal(result.success, true);
+        assert.ok(result.stdout.includes('rewind space test-'));
+      } finally {
+        fs.rmSync(tempSpaceDir, { recursive: true, force: true });
+      }
+    });
+
+    test('tokenizeCommandLine respects quotes, spaces, and escapes', () => {
+      const cmd = 'npm test -- --filter "test with spaces" --dir=\'my folder\' --flag';
+      const tokens = tokenizeCommandLine(cmd);
+      assert.deepEqual(tokens, [
+        'npm',
+        'test',
+        '--',
+        '--filter',
+        'test with spaces',
+        '--dir=my folder',
+        '--flag'
+      ]);
+    });
+  });
+
+  describe('Output Attack Protection & Display Sanitization', () => {
+    test('neutralizes OSC terminal hyperlinks and window title changes', () => {
+      const malicious = '\x1B]8;;https://malicious-site.com\x07Click here\x1B]8;;\x07 \x1B]0;Malicious Title\x07 \x1B[2J\x1B[H';
+      const sanitized = sanitizeOutput(malicious);
+      assert.ok(!sanitized.includes('\x1B'));
+      assert.ok(!sanitized.includes('\x07'));
+      assert.ok(!sanitized.includes('Malicious Title'));
+      assert.equal(sanitized.trim(), 'Click here');
+    });
+
+    test('strips dangerous non-printable ASCII control characters but preserves tabs and newlines', () => {
+      const malicious = 'Normal\ttext\nLine 2\x00\x01\x02\x03\x04\x05\x06\x07\x08\x0B\x0C\x0E\x1F\x7F';
+      const sanitized = sanitizeOutput(malicious);
+      assert.equal(sanitized, 'Normal\ttext\nLine 2');
+    });
+
+    test('normalizes carriage-return line overwrite attacks to safe newlines', () => {
+      const malicious = 'Secret malicious task started\rNormal status [OK]';
+      const sanitized = sanitizeOutput(malicious);
+      // \r is converted to \n so neither line is hidden/overwritten in logs
+      assert.equal(sanitized, 'Secret malicious task started\nNormal status [OK]');
+    });
+
+    test('strips orphan and malformed escape bytes', () => {
+      const broken = 'Text with trailing escape \x1B and incomplete \x1B[3';
+      const cleaned = stripAnsi(broken);
+      assert.ok(!cleaned.includes('\x1B'));
     });
   });
 
@@ -126,22 +244,6 @@ describe('Security & Privacy Hardening (test/security.test.js)', () => {
     });
   });
 
-  describe('Terminal Safety & Anti-ANSI Injection', () => {
-    test('neutralizes OSC terminal hyperlinks and cursor jumps', () => {
-      const malicious = '\x1B]8;;https://malicious-site.com\x07Click here\x1B]8;;\x07 \x1B[2J\x1B[H';
-      const sanitized = sanitizeOutput(malicious);
-      assert.ok(!sanitized.includes('\x1B'));
-      assert.ok(!sanitized.includes('\x07'));
-      assert.equal(sanitized.trim(), 'Click here');
-    });
-
-    test('strips dangerous non-printable ASCII control characters', () => {
-      const malicious = 'Normal text\x00\x01\x02\x03\x04\x05\x06\x07\x08\x0B\x0C\x0E\x1F\x7F';
-      const sanitized = sanitizeOutput(malicious);
-      assert.equal(sanitized, 'Normal text');
-    });
-  });
-
   describe('Privacy & Environment Key Isolation', () => {
     test('never stores sensitive environment variable values', () => {
       const rawEnv = {
@@ -154,7 +256,7 @@ describe('Security & Privacy Hardening (test/security.test.js)', () => {
 
       const safe = captureSafeEnvironment(rawEnv);
       assert.equal(safe.totalEnvVars, 5);
-      // Key names are recorded
+      // Key names are recorded for reproducibility hashing
       assert.ok(safe.envKeys.includes('AWS_SECRET_ACCESS_KEY'));
       assert.ok(safe.envKeys.includes('GITHUB_TOKEN'));
       assert.ok(safe.envKeys.includes('DATABASE_PASSWORD'));
@@ -169,8 +271,8 @@ describe('Security & Privacy Hardening (test/security.test.js)', () => {
     });
   });
 
-  describe('Resource Exhaustion Protection', () => {
-    test('caps stream buffers at configured memory limit', async () => {
+  describe('Resource Exhaustion Protection & Buffer Limits', () => {
+    test('caps stream buffers at configured memory limit and marks truncated', async () => {
       const result = await executeAndCapture([
         process.execPath,
         '-e',
@@ -180,7 +282,70 @@ describe('Security & Privacy Hardening (test/security.test.js)', () => {
       });
 
       assert.ok(result.stdoutRaw.length < 5000);
-      assert.ok(result.stdoutRaw.includes('[rewind: output truncated after 10MB limit]'));
+      assert.ok(result.stdoutRaw.includes('[rewind: output truncated after 2048 bytes limit]'));
+      assert.equal(result.isTruncated, true);
+    });
+
+    test('handles extremely long lines (100,000 characters) safely without crashing', async () => {
+      const result = await executeAndCapture([
+        process.execPath,
+        '-e',
+        'console.log("X".repeat(100000))'
+      ]);
+
+      assert.equal(result.success, true);
+      assert.ok(result.stdoutRaw.length >= 100000);
+      assert.equal(result.stdout.length >= 100000, true);
+    });
+  });
+
+  describe('Timeout, Signal Handling & Process Lifetime', () => {
+    test('distinguishes execution timeout from regular non-zero exit code', async () => {
+      const result = await executeAndCapture([
+        process.execPath,
+        '-e',
+        'setTimeout(() => console.log("done"), 5000)'
+      ], {
+        timeout: 100 // 100ms timeout
+      });
+
+      assert.equal(result.success, false);
+      assert.equal(result.timedOut, true);
+      assert.equal(result.exitCode !== 0, true);
+    });
+
+    test('mapSignalToExitCode maps standard POSIX signals to 128+N exit codes', () => {
+      assert.equal(mapSignalToExitCode('SIGINT'), 130);
+      assert.equal(mapSignalToExitCode('SIGTERM'), 143);
+      assert.equal(mapSignalToExitCode('SIGKILL'), 137);
+      assert.equal(mapSignalToExitCode('SIGHUP'), 129);
+      assert.equal(mapSignalToExitCode('UNKNOWN_SIGNAL'), 128);
+      assert.equal(mapSignalToExitCode(null), null);
+    });
+  });
+
+  describe('Path Traversal & ID Sanitization', () => {
+    test('rejects path traversal attempts in show command', async () => {
+      const mock1 = createMockIO();
+      const code1 = await runCLI(['show', '../../etc/passwd'], mock1.io);
+      assert.equal(code1, 1);
+      assert.ok(mock1.getStderr().includes('Incident #../../etc/passwd not found in ledger'));
+
+      const mock2 = createMockIO();
+      const code2 = await runCLI(['show', '1/../../../etc'], mock2.io);
+      assert.equal(code2, 1);
+    });
+
+    test('rejects path traversal attempts in recover command', async () => {
+      const mock = createMockIO();
+      const code = await runCLI(['recover', '../../1', '--cause', 'hack'], mock.io);
+      assert.equal(code, 1);
+    });
+
+    test('rejects path traversal attempts in verify command', async () => {
+      const mock = createMockIO();
+      const code = await runCLI(['verify', '../1'], mock.io);
+      assert.equal(code, 1);
     });
   });
 });

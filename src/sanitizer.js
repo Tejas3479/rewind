@@ -33,7 +33,8 @@ export function stripAnsi(str) {
     .replace(OSC_PATTERN, '')
     .replace(DCS_APC_PATTERN, '')
     .replace(CSI_PATTERN, '')
-    .replace(ESC_SINGLE_PATTERN, '');
+    .replace(ESC_SINGLE_PATTERN, '')
+    .replace(/\x1B/g, '');
 }
 
 /**

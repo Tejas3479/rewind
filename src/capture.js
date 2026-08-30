@@ -30,6 +30,28 @@ export const MAX_BUFFER_BYTES = 10 * 1024 * 1024;
  * @property {object} environment - Safe platform and environment metadata
  */
 
+const SIGNAL_MAP = {
+  SIGHUP: 129,
+  SIGINT: 130,
+  SIGQUIT: 131,
+  SIGKILL: 137,
+  SIGUSR1: 138,
+  SIGUSR2: 140,
+  SIGALRM: 142,
+  SIGTERM: 143
+};
+
+/**
+ * Maps a POSIX termination signal string to standard 128+N exit code.
+ *
+ * @param {string|null} signal
+ * @returns {number|null}
+ */
+export function mapSignalToExitCode(signal) {
+  if (!signal) return null;
+  return SIGNAL_MAP[signal] || 128;
+}
+
 /**
  * Executes a child process, streams its output live, and captures all lifecycle,
  * output, git, and environment diagnostic evidence with safety limits.
@@ -67,19 +89,68 @@ export async function executeAndCapture(commandTokens, options = {}) {
   let stderrBytes = 0;
   let stdoutTruncated = false;
   let stderrTruncated = false;
+  let isTimedOut = false;
 
   return new Promise((resolve, reject) => {
     let childProcess;
+    let timeoutTimer = null;
+
     try {
       childProcess = spawn(executable, args, {
         cwd,
         env,
         shell: useShell,
-        stdio: ['inherit', 'pipe', 'pipe'],
-        timeout: options.timeout
+        stdio: ['inherit', 'pipe', 'pipe']
       });
     } catch (err) {
       return reject(new SpawnError(`Failed to spawn command "${executable}": ${err.message}`, { originalError: err.message }));
+    }
+
+    // Forward parent SIGINT and SIGTERM to child process to prevent orphaned processes
+    const onSigInt = () => {
+      try {
+        if (childProcess && !childProcess.killed) {
+          childProcess.kill('SIGINT');
+        }
+      } catch {
+        // Ignore kill errors if already terminated
+      }
+    };
+
+    const onSigTerm = () => {
+      try {
+        if (childProcess && !childProcess.killed) {
+          childProcess.kill('SIGTERM');
+        }
+      } catch {
+        // Ignore kill errors if already terminated
+      }
+    };
+
+    process.on('SIGINT', onSigInt);
+    process.on('SIGTERM', onSigTerm);
+
+    const cleanup = () => {
+      process.removeListener('SIGINT', onSigInt);
+      process.removeListener('SIGTERM', onSigTerm);
+      if (timeoutTimer) {
+        clearTimeout(timeoutTimer);
+        timeoutTimer = null;
+      }
+    };
+
+    if (typeof options.timeout === 'number' && options.timeout > 0) {
+      timeoutTimer = setTimeout(() => {
+        isTimedOut = true;
+        try {
+          if (childProcess && !childProcess.killed) {
+            childProcess.kill('SIGTERM');
+          }
+        } catch {
+          // Ignore
+        }
+      }, options.timeout);
+      timeoutTimer.unref?.();
     }
 
     if (childProcess.stdout) {
@@ -89,7 +160,7 @@ export async function executeAndCapture(commandTokens, options = {}) {
           stdoutBytes += chunk.length;
         } else if (!stdoutTruncated) {
           stdoutTruncated = true;
-          stdoutChunks.push(Buffer.from('\n[rewind: output truncated after 10MB limit]\n', 'utf8'));
+          stdoutChunks.push(Buffer.from(`\n[rewind: output truncated after ${maxBuffer} bytes limit]\n`, 'utf8'));
         }
 
         if (stdoutStream && typeof stdoutStream.write === 'function') {
@@ -105,7 +176,7 @@ export async function executeAndCapture(commandTokens, options = {}) {
           stderrBytes += chunk.length;
         } else if (!stderrTruncated) {
           stderrTruncated = true;
-          stderrChunks.push(Buffer.from('\n[rewind: output truncated after 10MB limit]\n', 'utf8'));
+          stderrChunks.push(Buffer.from(`\n[rewind: output truncated after ${maxBuffer} bytes limit]\n`, 'utf8'));
         }
 
         if (stderrStream && typeof stderrStream.write === 'function') {
@@ -115,6 +186,7 @@ export async function executeAndCapture(commandTokens, options = {}) {
     }
 
     childProcess.on('error', (err) => {
+      cleanup();
       if (err.code === 'ENOENT') {
         reject(new SpawnError(`Command not found: "${executable}"`, { code: err.code }));
       } else {
@@ -123,6 +195,7 @@ export async function executeAndCapture(commandTokens, options = {}) {
     });
 
     childProcess.on('close', (exitCode, signal) => {
+      cleanup();
       const endHrTime = process.hrtime.bigint();
       const endTimeIso = new Date().toISOString();
       const durationMs = Number((endHrTime - startHrTime) / 1_000_000n);
@@ -137,6 +210,8 @@ export async function executeAndCapture(commandTokens, options = {}) {
       const gitMetadata = readGitMetadata(cwd);
       const safeEnv = captureSafeEnvironment(env);
 
+      const resolvedExitCode = exitCode !== null ? exitCode : (signal ? mapSignalToExitCode(signal) : 1);
+
       /** @type {CaptureRecord} */
       const record = {
         command: executable,
@@ -146,13 +221,15 @@ export async function executeAndCapture(commandTokens, options = {}) {
         startTime: startTimeIso,
         endTime: endTimeIso,
         durationMs,
-        exitCode: exitCode !== null ? exitCode : (signal ? 128 : 1),
+        exitCode: resolvedExitCode,
         signal: signal || null,
-        success: exitCode === 0 && signal === null,
+        timedOut: isTimedOut,
+        success: exitCode === 0 && signal === null && !isTimedOut,
         stdoutRaw,
         stderrRaw,
         stdout: stdoutSanitized,
         stderr: stderrSanitized,
+        isTruncated: stdoutTruncated || stderrTruncated,
         git: gitMetadata,
         environment: safeEnv
       };
