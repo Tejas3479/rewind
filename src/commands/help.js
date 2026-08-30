@@ -69,17 +69,22 @@ const COMMAND_DOCS = {
     ]
   },
   verify: {
-    usage: 'rewind verify <id>',
+    usage: 'rewind verify <id> [options]',
     description: 'Execute the verification command for an incident to validate the fix and seal the verified-recovery record.',
     arguments: [
       { name: '<id>', description: 'Incident ID to verify' }
     ],
     options: [
+      { flag: '--timeout <ms>, -t <ms>', description: 'Maximum execution time before timeout (default: 60000ms)' },
+      { flag: '--shell', description: 'Force execution inside system shell' },
+      { flag: '--json', description: 'Output verification results as JSON' },
       { flag: '--no-color', description: 'Disable ANSI color formatting' },
       { flag: '--root <path>', description: 'Explicit project root / ledger directory' }
     ],
     examples: [
-      'rewind verify 1'
+      'rewind verify 1',
+      'rewind verify 1 --timeout 30000',
+      'rewind verify 1 --json'
     ]
   },
   search: {

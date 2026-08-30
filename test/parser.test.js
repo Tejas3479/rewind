@@ -90,4 +90,21 @@ describe('Argument Parser (src/parser.js)', () => {
     assert.throws(() => parseArgs(['history', '--limit', '0']), InvalidArgumentError);
     assert.throws(() => parseArgs(['history', '--limit', 'abc']), InvalidArgumentError);
   });
+
+  test('parses and validates --timeout / -t and --shell flags', () => {
+    const res1 = parseArgs(['verify', '1', '--timeout', '5000', '--shell']);
+    assert.equal(res1.flags.timeout, 5000);
+    assert.equal(res1.flags.shell, true);
+
+    const res2 = parseArgs(['verify', '1', '-t', '10000']);
+    assert.equal(res2.flags.timeout, 10000);
+
+    const res3 = parseArgs(['verify', '1', '--timeout=2500']);
+    assert.equal(res3.flags.timeout, 2500);
+
+    assert.throws(() => parseArgs(['verify', '1', '--timeout']), InvalidArgumentError);
+    assert.throws(() => parseArgs(['verify', '1', '--timeout', '-1']), InvalidArgumentError);
+    assert.throws(() => parseArgs(['verify', '1', '--timeout', '0']), InvalidArgumentError);
+    assert.throws(() => parseArgs(['verify', '1', '--timeout', 'invalid']), InvalidArgumentError);
+  });
 });

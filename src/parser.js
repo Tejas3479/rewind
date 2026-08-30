@@ -19,6 +19,50 @@ import { InvalidArgumentError } from './errors.js';
  */
 
 /**
+ * Detects if a command line string contains unquoted shell control operators
+ * (such as &&, ||, ;, |, &, >, <).
+ *
+ * @param {string} cmdString
+ * @returns {boolean}
+ */
+export function hasShellOperators(cmdString) {
+  if (!cmdString || typeof cmdString !== 'string') return false;
+  let inDouble = false;
+  let inSingle = false;
+
+  for (let i = 0; i < cmdString.length; i++) {
+    const char = cmdString[i];
+    const nextChar = cmdString[i + 1];
+
+    if (char === '\\' && (nextChar === '"' || nextChar === "'" || nextChar === '\\')) {
+      i++;
+      continue;
+    }
+
+    if (char === '"' && !inSingle) {
+      inDouble = !inDouble;
+      continue;
+    }
+
+    if (char === "'" && !inDouble) {
+      inSingle = !inSingle;
+      continue;
+    }
+
+    if (!inDouble && !inSingle) {
+      if (char === ';' || char === '|' || char === '>' || char === '<') {
+        return true;
+      }
+      if (char === '&') {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+/**
  * Tokenizes a command line string into an array of arguments,
  * respecting double quotes, single quotes, and Windows/Unix path separators.
  *
@@ -90,7 +134,9 @@ export function parseArgs(rawArgs = []) {
     fingerprint: null,
     explain: false,
     repair: false,
-    dryRun: false
+    dryRun: false,
+    timeout: null,
+    shell: false
   };
 
   const positional = [];
@@ -118,6 +164,28 @@ export function parseArgs(rawArgs = []) {
       i++;
     } else if (arg === '--no-color') {
       flags.noColor = true;
+      i++;
+    } else if (arg === '--shell') {
+      flags.shell = true;
+      i++;
+    } else if (arg === '--timeout' || arg === '-t') {
+      i++;
+      if (i >= rawArgs.length || (rawArgs[i].startsWith('-') && !/^-\d+$/.test(rawArgs[i]))) {
+        throw new InvalidArgumentError('Option "--timeout" requires an integer value (in milliseconds).');
+      }
+      const num = Number.parseInt(rawArgs[i], 10);
+      if (Number.isNaN(num) || num < 1) {
+        throw new InvalidArgumentError(`Option "--timeout" requires a positive integer (ms), got "${rawArgs[i]}".`);
+      }
+      flags.timeout = num;
+      i++;
+    } else if (arg.startsWith('--timeout=')) {
+      const val = arg.slice('--timeout='.length);
+      const num = Number.parseInt(val, 10);
+      if (!val || Number.isNaN(num) || num < 1) {
+        throw new InvalidArgumentError(`Option "--timeout" requires a positive integer (ms), got "${val}".`);
+      }
+      flags.timeout = num;
       i++;
     } else if (arg === '--root') {
       i++;

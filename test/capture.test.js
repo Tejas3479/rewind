@@ -101,4 +101,25 @@ describe('Command Capture Engine (src/capture.js)', () => {
       }
     );
   });
+
+  test('executes shell compound commands when shell option is enabled', async () => {
+    const result = await executeAndCapture(
+      [`"${process.execPath}" -e "process.stdout.write('A')" && "${process.execPath}" -e "process.stdout.write('B')"`],
+      { shell: true }
+    );
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.success, true);
+    assert.ok(result.stdout.includes('AB'));
+  });
+
+  test('preserves FORCE_COLOR in child environment when appropriate', async () => {
+    const result = await executeAndCapture(
+      [process.execPath, '-e', 'console.log(process.env.FORCE_COLOR || "NONE")'],
+      { env: { ...process.env, FORCE_COLOR: '1' } }
+    );
+
+    assert.equal(result.exitCode, 0);
+    assert.ok(result.stdout.includes('1'));
+  });
 });

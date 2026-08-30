@@ -41,7 +41,7 @@ node bin/rewind.js patterns --explain
 # 9. Query structured forensic context for coding agents
 node bin/rewind.js context latest --json
 
-# 10. Run the complete automated test suite (228 tests across 64 suites, 0 dependencies)
+# 10. Run the complete automated test suite (233 tests across 64 suites, 0 dependencies)
 npm test
 
 # 11. Audit cryptographic integrity of the local ledger
@@ -170,6 +170,8 @@ To guarantee byte-level reproducibility:
 - `--no-color`: Disable ANSI styling (also respects standard [`NO_COLOR`](https://no-color.org))
 - `--root <path>`: Specify custom project root or `.rewind` directory location
 - `--limit <N>` / `-n <N>`: Limit number of results in `history`, `search`, and `patterns`
+- `--timeout <ms>` / `-t <ms>`: Process execution timeout in milliseconds (default: 60000ms for `verify`)
+- `--shell`: Force execution inside system shell (auto-detected for compound commands)
 - `--fingerprint <hash>` / `-f <hash>`: Filter `patterns` report to a specific failure family
 - `--explain`: Display rules, required criteria, and evidence reasoning in `patterns`
 
@@ -327,7 +329,7 @@ rewind --version
 
 ### Running Tests
 ```bash
-# Run complete test suite (228 automated unit, integration, security, and cross-platform tests across 64 suites)
+# Run complete test suite (233 automated unit, integration, security, and cross-platform tests across 64 suites)
 npm test
 
 # Run syntax verification across all codebase files
@@ -451,7 +453,7 @@ See [`SECURITY.md`](./SECURITY.md) for full threat model and mitigations.
 ## 13. Tested Platforms & Limitations
 
 ### Platform Testing Matrix
-- **Windows 10 / 11 (x64):** **VERIFIED ON PLATFORM** (Full test suite of 228 tests across 64 suites passing; live CLI execution verified). Supports `.cmd`, `.bat`, and native `.exe` binary resolution.
+- **Windows 10 / 11 (x64):** **VERIFIED ON PLATFORM** (Full test suite of 233 tests across 64 suites passing; live CLI execution verified). Supports `.cmd`, `.bat`, and native `.exe` binary resolution.
 - **Linux (Ubuntu / Debian / Fedora / Alpine):** **EXPECTED TO WORK** (Standard POSIX `execve`, permissions, and signals).
 - **macOS (Darwin / Apple Silicon & Intel):** **EXPECTED TO WORK** (Standard Darwin filesystem APIs and APFS semantics).
 
@@ -477,7 +479,7 @@ The entire Rewind CLI was designed, architected, implemented, hardened, and veri
 - 15-point self-diagnostic and safe repair command (`rewind doctor`).
 - Deterministic pattern intelligence engine with `--explain` evidentiary reasoning.
 - Safe, deterministic agent-consumption interface (`rewind context latest --json`).
-- 64 test suites covering 228 automated test cases.
+- 64 test suites covering 233 automated test cases.
 
 ### AI Tools Usage Disclosure
 Antigravity (Google DeepMind) was used as an AI pair programmer for code generation, test authoring, architectural review, and documentation drafting under developer direction. All generated code and tests were audited and verified against the event's zero-dependency rules.

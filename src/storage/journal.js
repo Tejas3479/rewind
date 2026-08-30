@@ -98,12 +98,19 @@ export function acquireJournalLock(lockPath, options = {}) {
         // If lock file is unreadable or malformed, don't crash, just retry
       }
 
-      // Synchronous sleep before retry with jitter
+      // Zero-CPU synchronous sleep before retry with jitter using standard SharedArrayBuffer + Atomics.wait
       const jitter = Math.floor(Math.random() * 10);
       const sleepTime = Math.min(200, retryDelay + jitter);
-      const waitEnd = Date.now() + sleepTime;
-      while (Date.now() < waitEnd) {
-        // Busy wait for sub-millisecond precision without external timers
+      try {
+        const sab = new SharedArrayBuffer(4);
+        const int32 = new Int32Array(sab);
+        Atomics.wait(int32, 0, 0, sleepTime);
+      } catch {
+        // Fallback for restricted environments
+        const waitEnd = Date.now() + sleepTime;
+        while (Date.now() < waitEnd) {
+          // Fallback busy wait
+        }
       }
       retryDelay = Math.min(200, retryDelay * 1.5);
     }

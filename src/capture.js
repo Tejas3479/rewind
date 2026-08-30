@@ -141,8 +141,37 @@ export async function executeAndCapture(commandTokens, options = {}) {
   const stderrStream = options.stderrStream || null;
   const maxBuffer = options.maxBufferBytes || MAX_BUFFER_BYTES;
 
-  const { resolvedExecutable, isBatchFile } = resolveExecutable(executable, cwd, env);
+  // Prepare child environment: preserve terminal color if TTY is present and NO_COLOR is not active
+  const childEnv = { ...env };
+  if (!childEnv.NO_COLOR && !process.env.NO_COLOR) {
+    if (process.stdout?.isTTY || process.env.FORCE_COLOR !== undefined) {
+      if (childEnv.FORCE_COLOR === undefined) {
+        childEnv.FORCE_COLOR = '1';
+      }
+    }
+  }
+
+  const { resolvedExecutable, isBatchFile } = resolveExecutable(executable, cwd, childEnv);
   const useShell = options.shell !== undefined ? Boolean(options.shell) : (process.platform === 'win32' && isBatchFile);
+
+  let spawnTarget = resolvedExecutable;
+  let spawnArgs = args;
+
+  if (useShell) {
+    if (options.shell) {
+      // Direct shell command string execution
+      if (commandTokens.length === 1) {
+        spawnTarget = commandTokens[0];
+        spawnArgs = [];
+      } else {
+        spawnTarget = commandTokens.join(' ');
+        spawnArgs = [];
+      }
+    } else if (args.length > 0 && args.some(a => ['&&', '||', ';', '|', '&', '>', '<'].includes(a))) {
+      spawnTarget = commandTokens.join(' ');
+      spawnArgs = [];
+    }
+  }
 
   const startTimeIso = new Date().toISOString();
   const startHrTime = process.hrtime.bigint();
@@ -160,9 +189,9 @@ export async function executeAndCapture(commandTokens, options = {}) {
     let timeoutTimer = null;
 
     try {
-      childProcess = spawn(resolvedExecutable, args, {
+      childProcess = spawn(spawnTarget, spawnArgs, {
         cwd,
-        env,
+        env: childEnv,
         shell: useShell,
         stdio: ['inherit', 'pipe', 'pipe']
       });

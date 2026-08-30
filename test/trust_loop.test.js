@@ -232,4 +232,60 @@ describe('Trust Loop State Machine & Verification (src/storage/state.js)', () =>
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   });
+
+  test('rewind verify handles compound shell verification commands cleanly', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rewind-compound-verify-'));
+    try {
+      const rootFlag = `--root=${tmpDir}`;
+      const mock1 = createMockIO({ cwd: tmpDir });
+      await runCLI([rootFlag, 'run', process.execPath, '-e', 'console.error("fail"); process.exit(1);'], mock1.io);
+
+      const mock2 = createMockIO({ cwd: tmpDir });
+      await runCLI([
+        rootFlag,
+        'recover',
+        '1',
+        '--change',
+        'compound fix',
+        '--verify-cmd',
+        `"${process.execPath}" -e "process.exit(0);" && "${process.execPath}" -e "process.exit(0);"`
+      ], mock2.io);
+
+      const mock3 = createMockIO({ cwd: tmpDir });
+      const code3 = await runCLI([rootFlag, 'verify', '1'], mock3.io);
+      assert.equal(code3, 0);
+      assert.ok(mock3.getStdout().includes('RECOVERY VERIFIED'));
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  test('rewind verify terminates cleanly and flags timeout when verification exceeds limit', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rewind-timeout-verify-'));
+    try {
+      const rootFlag = `--root=${tmpDir}`;
+      const mock1 = createMockIO({ cwd: tmpDir });
+      await runCLI([rootFlag, 'run', process.execPath, '-e', 'console.error("fail"); process.exit(1);'], mock1.io);
+
+      const mock2 = createMockIO({ cwd: tmpDir });
+      // Verification command sleeps for 5 seconds
+      await runCLI([
+        rootFlag,
+        'recover',
+        '1',
+        '--change',
+        'slow fix',
+        '--verify-cmd',
+        `"${process.execPath}" -e "setTimeout(() => process.exit(0), 5000);"`
+      ], mock2.io);
+
+      // Verify with a 200ms timeout
+      const mock3 = createMockIO({ cwd: tmpDir });
+      const code3 = await runCLI([rootFlag, 'verify', '1', '--timeout', '200'], mock3.io);
+      assert.notEqual(code3, 0);
+      assert.ok(mock3.getStderr().includes('TIMED OUT') || mock3.getStderr().includes('timed out'));
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
 });

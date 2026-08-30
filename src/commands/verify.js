@@ -1,7 +1,7 @@
 import { MissingArgumentError, CliError, UsageError } from '../errors.js';
 import { IncidentStatus, RecoveryAttemptStatus } from '../storage/state.js';
 import { executeAndCapture } from '../capture.js';
-import { tokenizeCommandLine } from '../parser.js';
+import { tokenizeCommandLine, hasShellOperators } from '../parser.js';
 import { formatJson, formatBox } from '../formatter.js';
 import { sanitizeForDisplay } from '../sanitizer.js';
 import { normalizeId } from '../storage/store.js';
@@ -71,13 +71,21 @@ export async function verifyCommand({ context }) {
   // Execute ONLY the explicitly stored verification command
   const stdoutStream = isJsonMode ? null : stdout;
   const stderrStream = isJsonMode ? null : stderr;
-  const commandTokens = tokenizeCommandLine(verifyCmd);
+
+  const isShellCommand = Boolean(parsedArgs.flags.shell) || hasShellOperators(verifyCmd);
+  const commandTokens = isShellCommand ? [verifyCmd] : tokenizeCommandLine(verifyCmd);
+
+  const timeoutMs = typeof parsedArgs.flags.timeout === 'number' && parsedArgs.flags.timeout > 0
+    ? parsedArgs.flags.timeout
+    : 60000; // 60-second default safeguard against infinite loops
 
   const verifyResult = await executeAndCapture(commandTokens, {
     cwd: config.rootDir,
     env,
     stdoutStream,
-    stderrStream
+    stderrStream,
+    shell: isShellCommand,
+    timeout: timeoutMs
   });
 
   const runOutput = (verifyResult.stdout || verifyResult.stderr || '').trim();
@@ -131,11 +139,13 @@ export async function verifyCommand({ context }) {
     return 0;
   } else {
     const exitCode = typeof verifyResult.exitCode === 'number' ? verifyResult.exitCode : 1;
+    const isTimeout = Boolean(verifyResult.timedOut);
 
     if (isJsonMode) {
       stdout.write(formatJson({
         status: 'failure',
         verified: false,
+        timedOut: isTimeout,
         incidentStatus: updated.status,
         conflicts: conflictReport,
         data: updated
@@ -144,13 +154,22 @@ export async function verifyCommand({ context }) {
     }
 
     const tag = styler.badge('rewind', styler.red);
-    stderr.write(`\n${tag} ${styler.bold(styler.red('NOT VERIFIED:'))} Verification command failed with exit code ${exitCode}.\n`);
+    const failureMsg = isTimeout
+      ? `Verification command timed out after ${timeoutMs}ms.`
+      : `Verification command failed with exit code ${exitCode}.`;
+    stderr.write(`\n${tag} ${styler.bold(styler.red('NOT VERIFIED:'))} ${failureMsg}\n`);
 
-    const box = formatBox('✗ VERIFICATION FAILED (Preserved in Negative Memory)', [
+    const boxTitle = isTimeout
+      ? '✗ VERIFICATION TIMED OUT (Preserved in Negative Memory)'
+      : '✗ VERIFICATION FAILED (Preserved in Negative Memory)';
+
+    const resultLabel = isTimeout ? `Timed out (${timeoutMs}ms limit)` : String(exitCode);
+
+    const box = formatBox(boxTitle, [
       { label: 'Incident', value: `#${id}` },
       { label: 'Attempt', value: `#${targetAttempt.id} (Marked FAILED)` },
       { label: 'Verify Command', value: verifyCmd },
-      { label: 'Exit Code', value: String(exitCode) },
+      { label: 'Result', value: resultLabel },
       { label: 'Duration', value: `${verifyResult.durationMs}ms` }
     ], styler, 'error');
 
