@@ -1,0 +1,15 @@
+# Zero Dependency Hackathon Submission Metadata
+# Specification: https://zerodepshack.com/#anatomy
+
+[project]
+name = "rewind"
+track = "A" # Track A: Developer Tools & CLI
+pitch = "Zero-dependency CLI ledger and forensic recovery engine for failed commands, tests, and CI builds."
+language = "JavaScript (Node.js)"
+runtime_dependencies = 0
+build_dependencies = 0
+
+[build]
+command = "node bin/rewind.js --version"
+test = "node --test"
+proof = "node -e \"const pkg = require('./package.json'); if (Object.keys(pkg.dependencies || {}).length > 0) process.exit(1); console.log('Dependencies: {}');\""

@@ -107,7 +107,7 @@ This document details every third-party package normally used for these features
 
 * **Normally:** `jest`, `mocha`, `vitest`, or `chai`
 * **Rewind uses:** Native Node.js test runner (`node:test`) and assertion module (`node:assert/strict`).
-* **Why:** Comprehensive unit, integration, security, and cross-platform testing (293 test cases across 84 test suites) executed directly with `node --test` without installing any test framework dependencies.
+* **Why:** Comprehensive unit, integration, security, and cross-platform testing (299 test cases across 84 test suites) executed directly with `node --test` without installing any test framework dependencies.
 * **Actual Code Location:** [`test/*.test.js`](./test/)
 
 ---

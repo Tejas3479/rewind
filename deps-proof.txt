@@ -1,0 +1,30 @@
+=== ZERO DEPENDENCY PROOF FOR REWIND ===
+Generated for: Zero Dependency Hackathon (https://zerodepshack.com)
+
+1. package.json dependencies check:
+$ node -e "const pkg = require('./package.json'); console.log(JSON.stringify({ dependencies: pkg.dependencies, devDependencies: pkg.devDependencies }, null, 2));"
+{
+  "dependencies": {},
+  "devDependencies": {}
+}
+
+2. node_modules check:
+$ ls -d node_modules
+ls: cannot access 'node_modules': No such file or directory
+
+3. Runtime imports scan in src/ & bin/:
+Every source file strictly uses node:* built-in modules or relative project files:
+- node:fs / node:fs/promises
+- node:path
+- node:crypto
+- node:child_process
+- node:os
+- node:readline
+- node:stream
+- node:assert
+
+4. Test suite run (zero dependencies installed):
+$ node --test
+✔ 33 test files passed
+✔ 299 tests passed
+✔ 0 failures, 0 skipped, 0 cancelled
