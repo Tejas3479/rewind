@@ -159,11 +159,15 @@ To guarantee byte-level reproducibility:
 | `rewind run <command...>` | Execute a command, stream output live, and record failure evidence on non-zero exit |
 | `rewind history [options]` | View failure records and recovery ledger timeline (sorted newest first) |
 | `rewind show <id> [options]` | Inspect complete forensic failure snapshot, logs, environment, and recovery status |
+| `rewind triage [id]` | Interactive 7-step guided recovery triage and verification wizard |
 | `rewind recover <id> [options]` | Record suspected cause, remediation change, and explicit verification command |
 | `rewind verify <id>` | Execute the user-approved verification command to validate and seal the fix |
 | `rewind search <query...> [options]` | Deterministically search historical failures by error message, keywords, or fingerprint |
 | `rewind patterns [options]` | Analyze historical failures into deterministic, evidence-backed pattern diagnostics |
 | `rewind context [latest|<id>] [options]` | Query structured forensic diagnostic context and remedies for coding agents |
+| `rewind export-shared [options]` | Export portable, sanitized recovery bundle for team sharing without Git |
+| `rewind import-shared [file]` | Import verified knowledge from a shared recovery bundle |
+| `rewind hook <shell>` | Generate passive failure-observation hooks for Bash, Zsh, or PowerShell |
 | `rewind doctor [options]` | Run 15-point installation & ledger health audit with safe repair capability |
 | `rewind verify-integrity [options]` | Perform read-only 4-layer cryptographic audit across hash chain and checkpoints |
 | `rewind rebuild [options]` | Reconstruct derived incident projection records from the authoritative journal |
@@ -334,7 +338,7 @@ rewind --version
 
 ### Running Tests
 ```bash
-# Run complete test suite (293 automated unit, integration, security, and cross-platform tests across 84 suites)
+# Run complete test suite (313 automated tests across 35 test files and 90 test suites)
 npm test
 
 # Run syntax verification across all codebase files
@@ -519,7 +523,7 @@ See [`SECURITY.md`](./SECURITY.md) for full threat model and mitigations.
 ## 15. Tested Platforms & Limitations
 
 ### Platform Testing Matrix
-- **Windows 10 / 11 (x64):** **VERIFIED ON PLATFORM** (Full test suite of 293 tests across 84 suites passing; live CLI execution verified). Supports `.cmd`, `.bat`, and native `.exe` binary resolution.
+- **Windows 10 / 11 (x64):** **VERIFIED ON PLATFORM** (Full test suite of 313 tests across 35 test files and 90 test suites passing; live CLI execution verified). Supports `.cmd`, `.bat`, and native `.exe` binary resolution.
 - **Linux (Ubuntu / Debian / Fedora / Alpine):** **EXPECTED TO WORK** (Standard POSIX `execve`, permissions, and signals).
 - **macOS (Darwin / Apple Silicon & Intel):** **EXPECTED TO WORK** (Standard Darwin filesystem APIs and APFS semantics).
 
@@ -545,7 +549,7 @@ The entire Rewind CLI was designed, architected, implemented, hardened, and veri
 - 15-point self-diagnostic and safe repair command (`rewind doctor`).
 - Deterministic pattern intelligence engine with `--explain` evidentiary reasoning.
 - Safe, deterministic agent-consumption interface (`rewind context latest --json`).
-- 64 test suites covering 233 automated test cases.
+- 35 test files covering 313 automated test cases across 90 suites.
 
 ### AI Tools Usage Disclosure
 Antigravity (Google DeepMind) was used as an AI pair programmer for code generation, test authoring, architectural review, and documentation drafting under developer direction. All generated code and tests were audited and verified against the event's zero-dependency rules.
@@ -557,6 +561,17 @@ Antigravity (Google DeepMind) was used as an AI pair programmer for code generat
 
 ---
 
+## 17. Zero Dependency Hackathon Receipts & Bonus Proofs
+
+| Challenge | Status | Receipt / Proof |
+| :--- | :---: | :--- |
+| **Track A: Developer Tools & CLI** | **SUBMITTED** | See [`.zero-dep.toml`](./.zero-dep.toml) and [pitch below](#what-is-rewind-and-why-does-it-exist) |
+| **Package Killer (+3 pts)** | **COMPLETED** | Pure Myers / LCS Unified Diff Engine ([`src/diff.js`](./src/diff.js)) replacing `diff` / `fast-diff` (50M+ downloads), ANSI Styler replacing `chalk` (150M+ downloads), CLI Parser replacing `commander` (160M+ downloads). See [`STDLIB.md`](./STDLIB.md). |
+| **STDLIB Log (+3 pts)** | **COMPLETED** | 16 non-trivial standard library substitutions documented in [`STDLIB.md`](./STDLIB.md). |
+| **Reproducible Build (+5 pts)** | **COMPLETED** | Dual-pass deterministic compilation engine ([`scripts/build.js`](./scripts/build.js)) producing byte-identical artifact hash `42b91576a90a5e77b91c40c5504bf7573685b5ed8bdda23d1809a5edba1047b4`. See [`REPRODUCIBLE_BUILD.md`](./REPRODUCIBLE_BUILD.md). |
+
+---
+
 ## License
 
-MIT © 2026 Rewind Contributors
+MIT © 2026 Tejas3479 (See [LICENSE](./LICENSE))
