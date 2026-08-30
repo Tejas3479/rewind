@@ -1,6 +1,6 @@
 # Reproducible Build Verification & Hashes (`REPRODUCIBLE_BUILD.md`)
 
-> **Zero Dependency Hackathon — Bonus Challenge: Reproducible Build (+5 Points, Hard)**  
+> **Zero Dependency Hackathon — Deterministic Reproducible Build**  
 > *“Build your artifact twice and produce byte-identical output. Publish both hashes. Determinism is the discipline that most dependency-heavy stacks quietly lost.”*
 
 ---
