@@ -3,6 +3,7 @@ import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
 import { canonicalStringify, computeCanonicalDigest } from './canonical.js';
+import { safeAtomicRenameSync } from './projection.js';
 import { CliError } from '../errors.js';
 
 export const GENESIS_HASH = '0000000000000000000000000000000000000000000000000000000000000000';
@@ -309,7 +310,7 @@ export function writeCheckpoint(ledgerDir, checkpointData) {
     fs.closeSync(fd);
   }
 
-  fs.renameSync(tmpPath, checkpointPath);
+  safeAtomicRenameSync(tmpPath, checkpointPath);
 }
 
 /**

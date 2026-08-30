@@ -203,6 +203,33 @@ export function projectEventsToRecords(events = []) {
 }
 
 /**
+ * Atomically renames a temporary file to destination path with cross-platform
+ * resilience against Windows EPERM/EBUSY handle contention.
+ *
+ * @param {string} sourcePath
+ * @param {string} destPath
+ */
+export function safeAtomicRenameSync(sourcePath, destPath) {
+  try {
+    fs.renameSync(sourcePath, destPath);
+  } catch (err) {
+    if (err.code === 'EPERM' || err.code === 'EEXIST' || err.code === 'EBUSY') {
+      try {
+        if (fs.existsSync(destPath)) {
+          fs.unlinkSync(destPath);
+        }
+        fs.renameSync(sourcePath, destPath);
+      } catch {
+        fs.copyFileSync(sourcePath, destPath);
+        try { fs.unlinkSync(sourcePath); } catch {}
+      }
+    } else {
+      throw err;
+    }
+  }
+}
+
+/**
  * Reconstructs all derived incident files in .rewind/records/ from the projected state.
  *
  * Invariants:
@@ -242,7 +269,7 @@ export function writeProjectedRecords(ledgerDir, projectedRecords) {
     }
 
     const destPath = path.join(recordsDir, `${id}.json`);
-    fs.renameSync(tmpPath, destPath);
+    safeAtomicRenameSync(tmpPath, destPath);
     writtenCount++;
   }
 

@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { readGitMetadata } from './git.js';
 import { captureSafeEnvironment } from './environment.js';
@@ -8,6 +10,66 @@ import { SpawnError } from './errors.js';
  * Maximum captured buffer size per stream (10MB) to prevent resource exhaustion.
  */
 export const MAX_BUFFER_BYTES = 10 * 1024 * 1024;
+
+/**
+ * Resolves an executable command across Windows and POSIX systems.
+ * On Windows, searches PATH and PATHEXT to detect if an executable is a .cmd/.bat script
+ * that requires Windows shell execution under Node's security model.
+ *
+ * @param {string} executable
+ * @param {string} [cwd=process.cwd()]
+ * @param {Record<string, string>} [env=process.env]
+ * @returns {{ resolvedExecutable: string, isBatchFile: boolean }}
+ */
+export function resolveExecutable(executable, cwd = process.cwd(), env = process.env) {
+  if (process.platform !== 'win32') {
+    return { resolvedExecutable: executable, isBatchFile: false };
+  }
+
+  // If executable explicitly ends with .cmd or .bat
+  if (/\.(cmd|bat)$/i.test(executable)) {
+    const target = executable.includes(' ') && !executable.startsWith('"') ? `"${executable}"` : executable;
+    return { resolvedExecutable: target, isBatchFile: true };
+  }
+
+  // If executable explicitly ends with .exe or .com
+  if (/\.(exe|com)$/i.test(executable)) {
+    return { resolvedExecutable: executable, isBatchFile: false };
+  }
+
+  // Look up PATH and PATHEXT case-insensitively
+  const pathEnvKey = Object.keys(env).find(k => k.toUpperCase() === 'PATH') || 'PATH';
+  const pathExtEnvKey = Object.keys(env).find(k => k.toUpperCase() === 'PATHEXT') || 'PATHEXT';
+
+  const pathStr = env[pathEnvKey] || '';
+  const pathExtStr = env[pathExtEnvKey] || '.COM;.EXE;.BAT;.CMD';
+  const extensions = pathExtStr.split(';').filter(Boolean);
+
+  const searchDirs = [cwd, ...pathStr.split(path.delimiter).filter(Boolean)];
+
+  for (const dir of searchDirs) {
+    for (const ext of extensions) {
+      const candidate = path.join(dir, `${executable}${ext}`);
+      try {
+        if (fs.existsSync(candidate)) {
+          const isBatch = /\.(cmd|bat)$/i.test(ext);
+          // If it's a batch script, passing the original command name with shell: true
+          // or quoted path ensures cmd.exe executes it cleanly on Windows
+          const target = isBatch
+            ? (executable.includes(path.sep) || executable.includes('/')
+                ? (candidate.includes(' ') && !candidate.startsWith('"') ? `"${candidate}"` : candidate)
+                : executable)
+            : candidate;
+          return { resolvedExecutable: target, isBatchFile: isBatch };
+        }
+      } catch {
+        // Ignore file access errors
+      }
+    }
+  }
+
+  return { resolvedExecutable: executable, isBatchFile: false };
+}
 
 /**
  * Execution and capture result record.
@@ -62,7 +124,7 @@ export function mapSignalToExitCode(signal) {
  * @param {Record<string, string>} [options.env=process.env] - Process environment
  * @param {NodeJS.WritableStream|null} [options.stdoutStream] - Stream to pipe live stdout to
  * @param {NodeJS.WritableStream|null} [options.stderrStream] - Stream to pipe live stderr to
- * @param {boolean} [options.shell=false] - Whether to spawn inside a shell
+ * @param {boolean} [options.shell] - Whether to spawn inside a shell
  * @param {number} [options.timeout] - Process execution timeout in ms
  * @param {number} [options.maxBufferBytes=MAX_BUFFER_BYTES] - Maximum buffer bytes per stream
  * @returns {Promise<CaptureRecord>}
@@ -77,8 +139,10 @@ export async function executeAndCapture(commandTokens, options = {}) {
   const env = options.env || process.env;
   const stdoutStream = options.stdoutStream || null;
   const stderrStream = options.stderrStream || null;
-  const useShell = options.shell !== undefined ? Boolean(options.shell) : false;
   const maxBuffer = options.maxBufferBytes || MAX_BUFFER_BYTES;
+
+  const { resolvedExecutable, isBatchFile } = resolveExecutable(executable, cwd, env);
+  const useShell = options.shell !== undefined ? Boolean(options.shell) : (process.platform === 'win32' && isBatchFile);
 
   const startTimeIso = new Date().toISOString();
   const startHrTime = process.hrtime.bigint();
@@ -96,7 +160,7 @@ export async function executeAndCapture(commandTokens, options = {}) {
     let timeoutTimer = null;
 
     try {
-      childProcess = spawn(executable, args, {
+      childProcess = spawn(resolvedExecutable, args, {
         cwd,
         env,
         shell: useShell,
