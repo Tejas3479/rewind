@@ -565,7 +565,7 @@ Antigravity (Google DeepMind) was used as an AI pair programmer for code generat
 
 | Challenge | Status | Receipt / Proof |
 | :--- | :---: | :--- |
-| **Track A: Developer Tools & CLI** | **SUBMITTED** | See [`.zero-dep.toml`](./.zero-dep.toml) and [pitch below](#what-is-rewind-and-why-does-it-exist) |
+| **Track A: Developer Tools & CLI** | **SUBMITTED** | See [`.zero-dep.toml`](./.zero-dep.toml) and [pitch & project overview](#2-what-is-rewind-and-why-does-it-exist) |
 | **Package Killer (+3 pts)** | **COMPLETED** | Pure Myers / LCS Unified Diff Engine ([`src/diff.js`](./src/diff.js)) replacing `diff` / `fast-diff` (50M+ downloads), ANSI Styler replacing `chalk` (150M+ downloads), CLI Parser replacing `commander` (160M+ downloads). See [`STDLIB.md`](./STDLIB.md). |
 | **STDLIB Log (+3 pts)** | **COMPLETED** | 16 non-trivial standard library substitutions documented in [`STDLIB.md`](./STDLIB.md). |
 | **Reproducible Build (+5 pts)** | **COMPLETED** | Dual-pass deterministic compilation engine ([`scripts/build.js`](./scripts/build.js)) producing byte-identical artifact hash `42b91576a90a5e77b91c40c5504bf7573685b5ed8bdda23d1809a5edba1047b4`. See [`REPRODUCIBLE_BUILD.md`](./REPRODUCIBLE_BUILD.md). |
