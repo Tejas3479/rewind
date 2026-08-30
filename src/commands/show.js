@@ -1,26 +1,9 @@
 import { MissingArgumentError, CliError } from '../errors.js';
-import { formatJson, formatStatusBadge } from '../formatter.js';
+import { formatJson, formatStatusBadge, formatUtc } from '../formatter.js';
 import { sanitizeForDisplay } from '../sanitizer.js';
 import { normalizeId } from '../storage/store.js';
 import { formatNegativeMemorySection } from '../storage/negative_memory.js';
 import { formatContradictionSection } from '../storage/contradiction.js';
-
-/**
- * Formats full UTC timestamp.
- *
- * @param {string} isoString
- * @returns {string}
- */
-function formatUtc(isoString) {
-  if (!isoString) return 'unknown';
-  try {
-    const d = new Date(isoString);
-    const pad = (n) => String(n).padStart(2, '0');
-    return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())} UTC`;
-  } catch {
-    return isoString;
-  }
-}
 
 /**
  * Handler for `rewind show <id> [options]`.

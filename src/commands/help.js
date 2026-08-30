@@ -70,6 +70,24 @@ const COMMAND_DOCS = {
       'rewind recover 1 --change "Patched connection pool size" --fixed --verify-cmd "npm test"'
     ]
   },
+  triage: {
+    usage: 'rewind triage [id] [options]',
+    description: 'Interactive 7-step guided recovery triage workflow to record causes, fixes, and run verification.',
+    arguments: [
+      { name: '[id]', description: 'Optional incident ID to triage (prompts for selection if omitted)' }
+    ],
+    options: [
+      { flag: '--timeout <ms>, -t <ms>', description: 'Maximum verification execution time before timeout (default: 60000ms)' },
+      { flag: '--shell', description: 'Force verification execution inside system shell' },
+      { flag: '--no-color', description: 'Disable ANSI color formatting' },
+      { flag: '--root <path>', description: 'Explicit project root / ledger directory' }
+    ],
+    examples: [
+      'rewind triage',
+      'rewind triage 1',
+      'rewind triage 1 --timeout 30000'
+    ]
+  },
   verify: {
     usage: 'rewind verify <id> [options]',
     description: 'Execute the verification command for an incident to validate the fix and seal the verified-recovery record.',
@@ -209,14 +227,15 @@ export function formatTopLevelHelp(s) {
     `  1. ${s.cyan('rewind run <command...>')}          Run command, stream output, and record failures on error`,
     `  2. ${s.cyan('rewind history')}                   Browse timeline of past failures and recovery states`,
     `  3. ${s.cyan('rewind show <id>')}                 Inspect full forensic logs, environment, and error fingerprint`,
-    `  4. ${s.cyan('rewind recover <id>')}              Record suspected cause, fix, and explicit verification command`,
-    `  5. ${s.cyan('rewind verify <id>')}               Run user-approved verification command to validate and seal fix`,
-    `  6. ${s.cyan('rewind search <query...>')}         Search past failures by keyword, error text, or fingerprint`,
-    `  7. ${s.cyan('rewind patterns')}                  Analyze failure/recovery patterns and flakiness diagnostics`,
-    `  8. ${s.cyan('rewind context [latest|<id>]')}     Output structured diagnostic context for coding agents`,
-    `  9. ${s.cyan('rewind doctor')}                    Run installation and ledger self-diagnostics`,
-    `  10. ${s.cyan('rewind verify-integrity')}         Audit cryptographic hash chain and checkpoint integrity`,
-    `  11. ${s.cyan('rewind rebuild')}                 Reconstruct derived incident views from immutable journal`,
+    `  4. ${s.cyan('rewind triage [id]')}               Interactive 7-step guided recovery triage and verification`,
+    `  5. ${s.cyan('rewind recover <id>')}              Record suspected cause, fix, and explicit verification command`,
+    `  6. ${s.cyan('rewind verify <id>')}               Run user-approved verification command to validate and seal fix`,
+    `  7. ${s.cyan('rewind search <query...>')}         Search past failures by keyword, error text, or fingerprint`,
+    `  8. ${s.cyan('rewind patterns')}                  Analyze failure/recovery patterns and flakiness diagnostics`,
+    `  9. ${s.cyan('rewind context [latest|<id>]')}     Output structured diagnostic context for coding agents`,
+    `  10. ${s.cyan('rewind doctor')}                   Run installation and ledger self-diagnostics`,
+    `  11. ${s.cyan('rewind verify-integrity')}        Audit cryptographic hash chain and checkpoint integrity`,
+    `  12. ${s.cyan('rewind rebuild')}                 Reconstruct derived incident views from immutable journal`,
     '',
     `${s.bold('GLOBAL OPTIONS:')}`,
     `  ${s.yellow('-h, --help')}                        Show help information`,

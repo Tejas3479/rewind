@@ -12,12 +12,14 @@ import { rebuildCommand } from './commands/rebuild.js';
 import { patternsCommand } from './commands/patterns.js';
 import { contextCommand } from './commands/context.js';
 import { doctorCommand } from './commands/doctor.js';
+import { triageCommand } from './commands/triage.js';
 
 export const COMMANDS = Object.freeze({
   run: runCommand,
   history: historyCommand,
   show: showCommand,
   recover: recoverCommand,
+  triage: triageCommand,
   verify: verifyCommand,
   search: searchCommand,
   patterns: patternsCommand,

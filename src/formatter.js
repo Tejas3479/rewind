@@ -233,6 +233,23 @@ export function formatBox(title, fields, styler, tone = 'info', options = {}) {
 }
 
 /**
+ * Formats full UTC timestamp string.
+ *
+ * @param {string} isoString
+ * @returns {string}
+ */
+export function formatUtc(isoString) {
+  if (!isoString) return 'unknown';
+  try {
+    const d = new Date(isoString);
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())} UTC`;
+  } catch {
+    return String(isoString);
+  }
+}
+
+/**
  * Serializes an object to formatted JSON.
  *
  * @param {unknown} data

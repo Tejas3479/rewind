@@ -20,34 +20,37 @@ node bin/rewind.js history
 # 3. Inspect deep forensic logs, git state, and hash fingerprint
 node bin/rewind.js show 1
 
-# 4. Record suspected root cause, attempted fix, and verification command
+# 4. Interactive guided triage workflow (prompts for cause, fix, and verification)
+node bin/rewind.js triage 1
+
+# 5. Or non-interactively record suspected cause, fix, and verification command
 node bin/rewind.js recover 1 \
   --cause "Connection pool size was set to 1 instead of 20" \
   --change "Increased pool size to 20 in database.config" \
   --verify-cmd 'node -e "process.exit(0);"'
 
-# 5. Execute user-approved verification command to seal recovery
+# 6. Execute user-approved verification command to seal recovery
 node bin/rewind.js verify 1
 
-# 6. Re-run the failing command -> Rewind instantly detects regression & surfaces verified remedy!
+# 7. Re-run the failing command -> Rewind instantly detects regression & surfaces verified remedy!
 node bin/rewind.js run node -e "console.error('FATAL: Database connection pool exhausted on port 5432'); process.exit(1);"
 
-# 7. Run self-diagnostics to verify local installation & ledger health
+# 8. Run self-diagnostics to verify local installation & ledger health
 node bin/rewind.js doctor
 
-# 8. Analyze failure & recovery patterns across the repository
+# 9. Analyze failure & recovery patterns across the repository
 node bin/rewind.js patterns --explain
 
-# 9. Query structured forensic context for coding agents
+# 10. Query structured forensic context for coding agents
 node bin/rewind.js context latest --json
 
-# 10. Run the complete automated test suite (254 tests across 66 suites, 0 dependencies)
+# 11. Run the complete automated test suite (267 tests across 72 suites, 0 dependencies)
 npm test
 
-# 11. Audit cryptographic integrity of the local ledger
+# 12. Audit cryptographic integrity of the local ledger
 node bin/rewind.js verify-integrity
 
-# 12. Rebuild derived incident projections from immutable journal
+# 13. Rebuild derived incident projections from immutable journal
 node bin/rewind.js rebuild
 ```
 

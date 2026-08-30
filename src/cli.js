@@ -17,6 +17,7 @@ import { CliError, ExitCodes } from './errors.js';
  * @property {NodeJS.ReadableStream} stdin
  * @property {Record<string, string>} env
  * @property {string} cwd
+ * @property {boolean} isTTY
  */
 
 /**
@@ -81,7 +82,8 @@ export async function runCLI(
       stderr,
       stdin,
       env,
-      cwd
+      cwd,
+      isTTY: typeof isTTY === 'boolean' ? isTTY : Boolean(stdin?.isTTY && stdout?.isTTY)
     };
 
     // 6. Dispatch command
