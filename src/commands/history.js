@@ -44,17 +44,14 @@ function getResultSummary(rec, s) {
 export async function historyCommand({ context }) {
   const { parsedArgs, storage, stdout, styler } = context;
 
-  const allRecords = storage.listRecords();
-  // Sort newest first (highest ID first)
-  const sorted = [...allRecords].reverse();
-
   const limit = parsedArgs.flags.limit;
-  const records = limit ? sorted.slice(0, limit) : sorted;
+  const totalCount = storage.index.size;
+  const records = storage.listRecords({ limit, reverse: true });
 
   if (parsedArgs.flags.json) {
     stdout.write(formatJson({
       status: 'success',
-      total: allRecords.length,
+      total: totalCount,
       count: records.length,
       data: records
     }) + '\n');
@@ -88,7 +85,7 @@ export async function historyCommand({ context }) {
   const dividerLen = Math.min(termWidth, Math.max(50, totalLineWidth));
   const divider = s.dim('─'.repeat(dividerLen));
 
-  stdout.write(`\n${s.bold('REWIND RECOVERY LEDGER')} ${s.dim(`(${allRecords.length} total incidents)`)}\n`);
+  stdout.write(`\n${s.bold('REWIND RECOVERY LEDGER')} ${s.dim(`(${totalCount} total incidents)`)}\n`);
   stdout.write(`${divider}\n`);
 
   // Header
@@ -118,7 +115,7 @@ export async function historyCommand({ context }) {
   }
 
   stdout.write(`${divider}\n`);
-  stdout.write(`${s.dim(`Showing ${records.length} of ${allRecords.length} incident(s). Run "${s.cyan('rewind show <id>')}" to inspect full forensic details.`)}\n\n`);
+  stdout.write(`${s.dim(`Showing ${records.length} of ${totalCount} incident(s). Run "${s.cyan('rewind show <id>')}" to inspect full forensic details.`)}\n\n`);
 
   return 0;
 }

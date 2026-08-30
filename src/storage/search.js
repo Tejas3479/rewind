@@ -61,16 +61,19 @@ function intersection(setA, setB) {
  *
  * @param {string} query
  * @param {import('./record.js').IncidentRecord} record
+ * @param {object} [context={}]
+ * @param {string} [context.cleanQuery]
+ * @param {Set<string>} [context.queryTokens]
  * @returns {SearchMatch}
  */
-export function scoreRecord(query, record) {
-  const cleanQuery = query.trim().toLowerCase();
+export function scoreRecord(query, record, context = {}) {
+  const cleanQuery = context.cleanQuery || query.trim().toLowerCase();
   const fp = (record.fingerprint || '').toLowerCase();
   const isRecovered = record.status === IncidentStatus.RECOVERED || record.status === 'VERIFIED';
-  const failedAttempts = extractNegativeMemory([record]);
 
   // 1. Tier 1: Exact Fingerprint Match
   if (fp && (cleanQuery === fp || fp.startsWith(cleanQuery) || cleanQuery.includes(fp))) {
+    const failedAttempts = extractNegativeMemory([record]);
     return {
       id: record.id,
       score: 1.0,
@@ -86,7 +89,7 @@ export function scoreRecord(query, record) {
     };
   }
 
-  const queryTokens = extractTokens(cleanQuery);
+  const queryTokens = context.queryTokens || extractTokens(cleanQuery);
   if (queryTokens.size === 0) {
     return {
       id: record.id,
@@ -96,7 +99,7 @@ export function scoreRecord(query, record) {
       status: record.status,
       reason: 'Empty or non-distinctive search query',
       matchedTokens: [],
-      failedAttemptsCount: failedAttempts.length,
+      failedAttemptsCount: 0,
       record
     };
   }
@@ -107,8 +110,13 @@ export function scoreRecord(query, record) {
   const errorTokens = extractTokens(errorText);
   const cmdTokens = extractTokens(cmdText);
 
-  const allRecordTokens = new Set([...errorTokens, ...cmdTokens]);
-  const matchedTokens = intersection(queryTokens, allRecordTokens);
+  // Fast token intersection without large object overhead
+  const matchedTokens = new Set();
+  for (const token of queryTokens) {
+    if (errorTokens.has(token) || cmdTokens.has(token)) {
+      matchedTokens.add(token);
+    }
+  }
 
   if (matchedTokens.size === 0) {
     return {
@@ -119,14 +127,15 @@ export function scoreRecord(query, record) {
       status: record.status,
       reason: 'No matching tokens found',
       matchedTokens: [],
-      failedAttemptsCount: failedAttempts.length,
+      failedAttemptsCount: 0,
       record
     };
   }
 
   // Calculate token metrics
+  const totalRecordTokens = errorTokens.size + cmdTokens.size;
   const recall = matchedTokens.size / queryTokens.size;
-  const unionSize = queryTokens.size + allRecordTokens.size - matchedTokens.size;
+  const unionSize = queryTokens.size + totalRecordTokens - matchedTokens.size;
   const jaccard = unionSize > 0 ? matchedTokens.size / unionSize : 0;
 
   // Substring exact phrase match bonus
@@ -143,6 +152,8 @@ export function scoreRecord(query, record) {
 
   const rawScore = (recall * 0.55) + (jaccard * 0.20) + phraseBonus + cmdBonus;
   const score = Math.min(1.0, Math.round(rawScore * 100) / 100);
+
+  const failedAttempts = extractNegativeMemory([record]);
 
   // Determine trust loop confidence:
   // Critical Trust Invariant: Unverified records NEVER have VERIFIED confidence
@@ -193,10 +204,14 @@ export function searchRecords(query, records = [], options = {}) {
   }
 
   const minScore = options.minScore ?? 0.15;
+  const cleanQuery = query.trim().toLowerCase();
+  const queryTokens = extractTokens(cleanQuery);
+  const context = { cleanQuery, queryTokens };
+
   const matches = [];
 
   for (const record of records) {
-    const match = scoreRecord(query, record);
+    const match = scoreRecord(query, record, context);
     if (match.score >= minScore) {
       matches.push(match);
     }

@@ -47,6 +47,8 @@ export class StorageEngine {
 
     /** @type {Map<string, import('./record.js').IncidentRecord>} */
     this.index = new Map();
+    /** @type {Map<string, Array<import('./record.js').IncidentRecord>>} */
+    this.fingerprintIndex = new Map();
     this.highestId = 0;
     /** @type {Array<{ file: string, reason: string, quarantinedAt: string }>} */
     this.quarantined = [];
@@ -97,12 +99,14 @@ export class StorageEngine {
     }
   }
 
-  rebuildIndex() {
+  rebuildIndex(options = {}) {
+    const forceSyncDisk = Boolean(options.syncDisk);
     this.index.clear();
+    this.fingerprintIndex.clear();
     this.highestId = 0;
     this.quarantined = [];
 
-    // First, scan recordsDir for any corrupted or unparseable files that need quarantine
+    // Scan recordsDir for any corrupted or unparseable files that need quarantine
     const quarantinedIds = new Set();
     if (fs.existsSync(this.recordsDir)) {
       let recordFiles = [];
@@ -136,6 +140,7 @@ export class StorageEngine {
       // 1. Crash Consistency check: if checkpoint lagged behind valid journal head, fast-forward it
       const checkpoint = readCheckpoint(this.ledgerDir);
       const lastEvent = events[events.length - 1];
+      const needsSync = forceSyncDisk || !checkpoint || checkpoint.headSequence < lastEvent.sequence;
 
       if (!checkpoint || checkpoint.headSequence < lastEvent.sequence) {
         writeCheckpoint(this.ledgerDir, {
@@ -153,15 +158,28 @@ export class StorageEngine {
         if (quarantinedIds.has(id)) {
           continue;
         }
+
         this.index.set(id, record);
+
+        if (record.fingerprint) {
+          let list = this.fingerprintIndex.get(record.fingerprint);
+          if (!list) {
+            list = [];
+            this.fingerprintIndex.set(record.fingerprint, list);
+          }
+          list.push(record);
+        }
+
         const numId = Number.parseInt(id, 10);
         if (!Number.isNaN(numId) && numId > this.highestId) {
           this.highestId = numId;
         }
       }
 
-      // 3. Sync derived projection files to disk
-      writeProjectedRecords(this.ledgerDir, this.index);
+      // 3. Sync derived projection files to disk ONLY when needed (e.g. initial generation or head sequence change)
+      if (needsSync) {
+        writeProjectedRecords(this.ledgerDir, this.index);
+      }
     } else if (fs.existsSync(this.recordsDir)) {
       // Legacy ledger fallback: migrate existing records to event journal
       let filenames = [];
@@ -353,13 +371,9 @@ export class StorageEngine {
    */
   findByFingerprint(fingerprint) {
     if (!fingerprint) return [];
-    const matches = [];
-    for (const record of this.index.values()) {
-      if (record.fingerprint === fingerprint) {
-        matches.push(record);
-      }
-    }
-    return matches.sort((a, b) => Number(b.id) - Number(a.id));
+    const list = this.fingerprintIndex.get(fingerprint);
+    if (!list) return [];
+    return [...list].sort((a, b) => Number(b.id) - Number(a.id));
   }
 
   /**
@@ -370,11 +384,13 @@ export class StorageEngine {
    */
   findVerifiedByFingerprint(fingerprint) {
     if (!fingerprint) return null;
+    const list = this.fingerprintIndex.get(fingerprint);
+    if (!list) return null;
     let latestVerified = null;
 
-    for (const record of this.index.values()) {
+    for (const record of list) {
       const isRecovered = record.status === IncidentStatus.RECOVERED || record.status === 'VERIFIED';
-      if (record.fingerprint === fingerprint && isRecovered) {
+      if (isRecovered) {
         if (!latestVerified || Number(record.id) > Number(latestVerified.id)) {
           latestVerified = record;
         }
@@ -459,7 +475,7 @@ export class StorageEngine {
     });
 
     // Replay projection for the new event and update in-memory index
-    this.rebuildIndex();
+    this.rebuildIndex({ syncDisk: true });
 
     const record = this.index.get(id);
     return record;
@@ -506,7 +522,7 @@ export class StorageEngine {
     });
 
     // Replay projection and refresh in-memory state
-    this.rebuildIndex();
+    this.rebuildIndex({ syncDisk: true });
 
     return this.getRecord(strId);
   }
@@ -569,7 +585,7 @@ export class StorageEngine {
     });
 
     // Replay projection and refresh in-memory state
-    this.rebuildIndex();
+    this.rebuildIndex({ syncDisk: true });
 
     return this.getRecord(strId);
   }
@@ -661,15 +677,30 @@ export class StorageEngine {
   }
 
   /**
-   * Returns all active incident records ordered by ID ascending.
+   * Returns active incident records. Supports bounded querying and reverse order.
    *
+   * @param {object} [options={}]
+   * @param {number} [options.limit]
+   * @param {boolean} [options.reverse=false]
    * @returns {Array<import('./record.js').IncidentRecord>}
    */
-  listRecords() {
+  listRecords(options = {}) {
     if (!this.initialized) {
       this.init();
     }
-    return Array.from(this.index.values()).sort((a, b) => Number(a.id) - Number(b.id));
+
+    const { limit, reverse = false } = options;
+    const values = Array.from(this.index.values());
+
+    if (reverse) {
+      values.reverse();
+    }
+
+    if (typeof limit === 'number' && limit > 0) {
+      return values.slice(0, limit);
+    }
+
+    return values;
   }
 
   /**
