@@ -198,6 +198,54 @@ describe('Conservative Near-Match Search (src/storage/search.js)', () => {
     }
   });
 
+  test('CLI: rewind search matches keywords and phrases in applied recovery fixes', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rewind-search-fix-'));
+    try {
+      const rootFlag = `--root=${tmpDir}`;
+
+      // 1. Run failure
+      const mockRun = createMockIO({ cwd: tmpDir });
+      await runCLI([rootFlag, 'run', process.execPath, '-e', 'console.error("Connection pool exhausted on port 5432"); process.exit(1);'], mockRun.io);
+
+      // 2. Recover with distinct fix text and verify
+      const mockRec = createMockIO({ cwd: tmpDir });
+      await runCLI([
+        rootFlag,
+        'recover',
+        '1',
+        '--cause',
+        'Default connection limit reached in postgresql.conf',
+        '--change',
+        'Increased max_connections to 200 in postgresql.conf',
+        '--verify-cmd',
+        `"${process.execPath}" -e "process.exit(0);"`
+      ], mockRec.io);
+
+      const mockVer = createMockIO({ cwd: tmpDir });
+      await runCLI([rootFlag, 'verify', '1'], mockVer.io);
+
+      // 3. Search using keywords from the applied fix (which are not in the error output)
+      const mockSearchFix = createMockIO({ cwd: tmpDir });
+      const codeFix = await runCLI([rootFlag, 'search', 'max_connections 200'], mockSearchFix.io);
+
+      assert.equal(codeFix, 0);
+      const textOut = mockSearchFix.getStdout();
+      assert.ok(textOut.includes('SEARCH RESULTS for "max_connections 200"'));
+      assert.ok(textOut.includes('VERIFIED RECOVERY'));
+      assert.ok(textOut.includes('Increased max_connections to 200'));
+
+      // 4. Search using keywords from the suspected cause
+      const mockSearchCause = createMockIO({ cwd: tmpDir });
+      const codeCause = await runCLI([rootFlag, 'search', 'postgresql.conf limit'], mockSearchCause.io);
+
+      assert.equal(codeCause, 0);
+      assert.ok(mockSearchCause.getStdout().includes('SEARCH RESULTS for "postgresql.conf limit"'));
+      assert.ok(mockSearchCause.getStdout().includes('Default connection limit reached'));
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
   test('CLI: rewind search on query with no matches returns friendly notice', async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rewind-search-none-'));
     try {

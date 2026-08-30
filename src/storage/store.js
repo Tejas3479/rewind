@@ -11,11 +11,12 @@ import {
   GENESIS_HASH,
   appendJournalEvent,
   readJournalEvents,
+  readLastJournalEvent,
   readCheckpoint,
   writeCheckpoint,
   saveEvidenceArtifact
 } from './journal.js';
-import { projectEventsToRecords, writeProjectedRecords } from './projection.js';
+import { projectEventsToRecords, applyEventToRecordMap, writeSingleProjectedRecord, writeProjectedRecords } from './projection.js';
 import { verifyLedgerIntegrity } from './integrity.js';
 import { analyzePatternsFromJournal } from './patterns.js';
 import { buildAgentContext } from './context.js';
@@ -57,7 +58,7 @@ export class StorageEngine {
 
   /**
    * Initializes the storage directory layout, cleans orphan temp files,
-   * replays the authoritative journal, and syncs derived projections.
+   * verifies trusted checkpoint against journal tail, and loads projections.
    */
   init() {
     // 1. Ensure directory hierarchy exists with secure permissions (0o700)
@@ -70,11 +71,140 @@ export class StorageEngine {
     // 2. Clean orphaned temporary files in tmpDir
     this.cleanOrphanedTempFiles();
 
-    // 3. Scan and replay authoritative journal, rebuilding projections
-    this.rebuildIndex();
+    // 3. Fast-path initialization: check if checkpoint matches journal tail and records are valid
+    const checkpoint = readCheckpoint(this.ledgerDir);
+    const lastEvent = readLastJournalEvent(this.journalPath);
+
+    const isJournalEmpty = !fs.existsSync(this.journalPath) || fs.statSync(this.journalPath).size === 0;
+
+    if (isJournalEmpty) {
+      if (fs.existsSync(this.recordsDir) && fs.readdirSync(this.recordsDir).some(f => f.endsWith('.json'))) {
+        // Legacy ledger fallback: rebuild and migrate to journal
+        this.rebuildIndex({ syncDisk: true });
+      }
+      this.initialized = true;
+      return this;
+    }
+
+    if (checkpoint && lastEvent && checkpoint.headSequence === lastEvent.sequence && checkpoint.headChainHash === lastEvent.chainHash) {
+      // Checkpoint is valid and strictly in sync with journal head: load from recordsDir
+      if (this.loadFromRecordsDir()) {
+        this.initialized = true;
+        return this;
+      }
+    }
+
+    // Otherwise, rebuild index from authoritative journal
+    this.rebuildIndex({ syncDisk: true });
 
     this.initialized = true;
     return this;
+  }
+
+  /**
+   * Fast-path reader that loads derived incident records directly from .rewind/records/*.json in O(M).
+   *
+   * @returns {boolean} - true if records loaded successfully
+   */
+  loadFromRecordsDir() {
+    this.index.clear();
+    this.fingerprintIndex.clear();
+    this.highestId = 0;
+    this.quarantined = [];
+
+    if (!fs.existsSync(this.recordsDir)) {
+      return false;
+    }
+
+    let files = [];
+    try {
+      files = fs.readdirSync(this.recordsDir);
+    } catch {
+      return false;
+    }
+
+    const jsonFiles = files.filter(f => f.endsWith('.json'));
+    if (jsonFiles.length === 0) {
+      return false;
+    }
+
+    for (const file of jsonFiles) {
+      const filePath = path.join(this.recordsDir, file);
+      try {
+        const content = fs.readFileSync(filePath, 'utf8');
+        const parsed = JSON.parse(content);
+        if (!isValidRecord(parsed)) {
+          this.quarantineFile(filePath, file, 'Schema validation failed: missing required fields');
+          continue;
+        }
+        const record = normalizeRecordToCurrentSchema(parsed);
+        const id = String(record.id);
+        this.index.set(id, record);
+
+        if (record.fingerprint) {
+          let list = this.fingerprintIndex.get(record.fingerprint);
+          if (!list) {
+            list = [];
+            this.fingerprintIndex.set(record.fingerprint, list);
+          }
+          list.push(record);
+        }
+
+        const numId = Number.parseInt(id, 10);
+        if (!Number.isNaN(numId) && numId > this.highestId) {
+          this.highestId = numId;
+        }
+      } catch (err) {
+        this.quarantineFile(filePath, file, `Malformed JSON: ${err.message}`);
+      }
+    }
+
+    return true;
+  }
+
+  /**
+   * Incrementally updates in-memory index with a single sealed journal event and writes
+   * the single projected record file to disk in O(1) time.
+   *
+   * @param {object} event
+   * @param {object} [options={}]
+   * @returns {import('./record.js').IncidentRecord|null}
+   */
+  applyJournalEvent(event, options = {}) {
+    const syncDisk = options.syncDisk !== false;
+    const updated = applyEventToRecordMap(this.index, event);
+
+    if (updated) {
+      const strId = String(updated.id);
+      this.index.set(strId, updated);
+
+      if (updated.fingerprint) {
+        let list = this.fingerprintIndex.get(updated.fingerprint);
+        if (!list) {
+          list = [];
+          this.fingerprintIndex.set(updated.fingerprint, list);
+        }
+        const existingIdx = list.findIndex(r => String(r.id) === strId);
+        if (existingIdx !== -1) {
+          list[existingIdx] = updated;
+        } else {
+          list.push(updated);
+        }
+      }
+
+      const numId = Number.parseInt(strId, 10);
+      if (!Number.isNaN(numId) && numId > this.highestId) {
+        this.highestId = numId;
+      }
+
+      if (syncDisk) {
+        writeSingleProjectedRecord(this.ledgerDir, updated);
+      }
+
+      return updated;
+    }
+
+    return null;
   }
 
   /**
@@ -452,7 +582,7 @@ export class StorageEngine {
     const eventType = initialState === IncidentStatus.REGRESSED ? 'regression.detected' : 'failure.observed';
 
     // Append to authoritative journal (with exclusive lock, fsync, and checkpoint update)
-    appendJournalEvent(this.ledgerDir, {
+    const event = appendJournalEvent(this.ledgerDir, {
       type: eventType,
       incidentId: id,
       payload: {
@@ -477,11 +607,9 @@ export class StorageEngine {
       }
     });
 
-    // Replay projection for the new event and update in-memory index
-    this.rebuildIndex({ syncDisk: true });
-
-    const record = this.index.get(id);
-    return record;
+    // Incrementally apply the event in O(1) and write single projected record
+    const record = this.applyJournalEvent(event, { syncDisk: true });
+    return record || this.index.get(id);
   }
 
   /**
@@ -518,7 +646,7 @@ export class StorageEngine {
       : (attemptData.change ? EvidenceQuality.USER_REPORTED : EvidenceQuality.UNVERIFIED);
 
     // Append recovery.proposed event to authoritative journal
-    appendJournalEvent(this.ledgerDir, {
+    const event = appendJournalEvent(this.ledgerDir, {
       type: 'recovery.proposed',
       incidentId: strId,
       payload: {
@@ -538,10 +666,8 @@ export class StorageEngine {
       }
     });
 
-    // Replay projection and refresh in-memory state
-    this.rebuildIndex({ syncDisk: true });
-
-    return this.getRecord(strId);
+    // Incrementally apply the event in O(1) and write single projected record
+    return this.applyJournalEvent(event, { syncDisk: true }) || this.getRecord(strId);
   }
 
 
@@ -586,7 +712,7 @@ export class StorageEngine {
     const outputHash = crypto.createHash('sha256').update(outputContent, 'utf8').digest('hex');
 
     // Append verification.run event to authoritative journal
-    appendJournalEvent(this.ledgerDir, {
+    const event = appendJournalEvent(this.ledgerDir, {
       type: 'verification.run',
       incidentId: strId,
       payload: {
@@ -604,10 +730,8 @@ export class StorageEngine {
       }
     });
 
-    // Replay projection and refresh in-memory state
-    this.rebuildIndex({ syncDisk: true });
-
-    return this.getRecord(strId);
+    // Incrementally apply the event in O(1) and write single projected record
+    return this.applyJournalEvent(event, { syncDisk: true }) || this.getRecord(strId);
   }
 
 

@@ -107,14 +107,33 @@ export function scoreRecord(query, record, context = {}) {
   const errorText = `${record.normalizedError || ''} ${record.stderr || ''}`.toLowerCase();
   const cmdText = `${record.fullCommand || ''} ${record.command || ''} ${(record.args || []).join(' ')}`.toLowerCase();
 
+  const recoveryParts = [];
+  if (Array.isArray(record.recoveryAttempts)) {
+    for (const attempt of record.recoveryAttempts) {
+      if (attempt.cause) recoveryParts.push(attempt.cause);
+      if (attempt.change) recoveryParts.push(attempt.change);
+      if (attempt.verifyCmd) recoveryParts.push(attempt.verifyCmd);
+      if (attempt.notes) recoveryParts.push(attempt.notes);
+      if (attempt.observedChanges) recoveryParts.push(attempt.observedChanges);
+    }
+  }
+  if (record.diagnostic?.suggestion) recoveryParts.push(record.diagnostic.suggestion);
+  if (record.diagnostic?.summary) recoveryParts.push(record.diagnostic.summary);
+  const recoveryText = recoveryParts.join(' ').toLowerCase();
+
   const errorTokens = extractTokens(errorText);
   const cmdTokens = extractTokens(cmdText);
+  const recoveryTokens = extractTokens(recoveryText);
 
   // Fast token intersection without large object overhead
   const matchedTokens = new Set();
+  let matchedInRecovery = false;
   for (const token of queryTokens) {
     if (errorTokens.has(token) || cmdTokens.has(token)) {
       matchedTokens.add(token);
+    } else if (recoveryTokens.has(token)) {
+      matchedTokens.add(token);
+      matchedInRecovery = true;
     }
   }
 
@@ -133,14 +152,14 @@ export function scoreRecord(query, record, context = {}) {
   }
 
   // Calculate token metrics
-  const totalRecordTokens = errorTokens.size + cmdTokens.size;
+  const totalRecordTokens = errorTokens.size + cmdTokens.size + recoveryTokens.size;
   const recall = matchedTokens.size / queryTokens.size;
   const unionSize = queryTokens.size + totalRecordTokens - matchedTokens.size;
   const jaccard = unionSize > 0 ? matchedTokens.size / unionSize : 0;
 
   // Substring exact phrase match bonus
   let phraseBonus = 0;
-  if (cleanQuery.length >= 4 && (errorText.includes(cleanQuery) || cmdText.includes(cleanQuery))) {
+  if (cleanQuery.length >= 4 && (errorText.includes(cleanQuery) || cmdText.includes(cleanQuery) || recoveryText.includes(cleanQuery))) {
     phraseBonus = 0.25;
   }
 
@@ -168,9 +187,15 @@ export function scoreRecord(query, record, context = {}) {
   const tokenList = Array.from(matchedTokens).slice(0, 5).join(', ');
   let reason = '';
   if (phraseBonus > 0) {
-    reason = `Exact query phrase match in failure output (${matchedTokens.size} matching terms: ${tokenList})`;
+    if (recoveryText.includes(cleanQuery)) {
+      reason = `Exact query phrase match in recovery attempts/fixes (${matchedTokens.size} matching terms: ${tokenList})`;
+    } else {
+      reason = `Exact query phrase match in failure output (${matchedTokens.size} matching terms: ${tokenList})`;
+    }
   } else if (recall >= 0.70) {
-    reason = `High token overlap in failure evidence (${matchedTokens.size}/${queryTokens.size} terms: ${tokenList})`;
+    reason = `High token overlap in failure and recovery evidence (${matchedTokens.size}/${queryTokens.size} terms: ${tokenList})`;
+  } else if (matchedInRecovery) {
+    reason = `Matching terms in historical recovery fixes and notes (${tokenList})`;
   } else {
     reason = `Partial token match across command and error context (${tokenList})`;
   }

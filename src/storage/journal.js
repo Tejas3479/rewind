@@ -232,6 +232,64 @@ export function readJournalEvents(journalPath) {
 }
 
 /**
+ * Fast-path reader that retrieves the last sealed event from journal.jsonl in O(1)
+ * without parsing the entire historical file.
+ *
+ * @param {string} journalPath
+ * @returns {object|null}
+ */
+export function readLastJournalEvent(journalPath) {
+  if (!fs.existsSync(journalPath)) {
+    return null;
+  }
+
+  try {
+    const stats = fs.statSync(journalPath);
+    if (stats.size === 0) {
+      return null;
+    }
+
+    const readSize = Math.min(stats.size, 65536);
+    const buffer = Buffer.alloc(readSize);
+    const fd = fs.openSync(journalPath, 'r');
+    try {
+      fs.readSync(fd, buffer, 0, readSize, stats.size - readSize);
+    } finally {
+      fs.closeSync(fd);
+    }
+
+    // Find the last non-empty line by scanning backwards
+    let end = readSize;
+    while (end > 0 && (buffer[end - 1] === 0x0A || buffer[end - 1] === 0x0D || buffer[end - 1] === 0x20 || buffer[end - 1] === 0x09)) {
+      end--;
+    }
+
+    if (end === 0) {
+      return null;
+    }
+
+    let start = end - 1;
+    while (start >= 0 && buffer[start] !== 0x0A) {
+      start--;
+    }
+    start = start + 1; // start of the last line
+
+    const lineStr = buffer.subarray(start, end).toString('utf8').trim();
+    if (lineStr) {
+      const parsed = JSON.parse(lineStr);
+      if (parsed && typeof parsed === 'object' && typeof parsed.sequence === 'number' && parsed.chainHash) {
+        return parsed;
+      }
+    }
+  } catch {
+    // Fall back to full journal read on any fast-path error or partial read
+  }
+
+  const { events } = readJournalEvents(journalPath);
+  return events.length > 0 ? events[events.length - 1] : null;
+}
+
+/**
  * Saves large process output into the isolated evidence store (.rewind/evidence/<hash>.log).
  *
  * @param {string} ledgerDir
@@ -322,7 +380,7 @@ export function writeCheckpoint(ledgerDir, checkpointData) {
 
 /**
  * Appends an event to the authoritative journal (.rewind/journal.jsonl) with full locking,
- * fsync durability, and checkpoint updating.
+ * fsync durability, and checkpoint updating in O(1) time.
  *
  * @param {string} ledgerDir - Absolute path to .rewind directory
  * @param {object} eventInput
@@ -338,13 +396,12 @@ export function appendJournalEvent(ledgerDir, eventInput, options = {}) {
   const lock = acquireJournalLock(lockPath, options);
 
   try {
-    // 1. Read the current journal state to determine sequence and prevHash
-    const { events } = readJournalEvents(journalPath);
+    // 1. Read last event in O(1) to determine sequence and prevHash
+    const lastEvent = readLastJournalEvent(journalPath);
     let sequence = 1;
     let prevHash = GENESIS_HASH;
 
-    if (events.length > 0) {
-      const lastEvent = events[events.length - 1];
+    if (lastEvent) {
       sequence = lastEvent.sequence + 1;
       prevHash = lastEvent.chainHash;
     }
@@ -371,11 +428,16 @@ export function appendJournalEvent(ledgerDir, eventInput, options = {}) {
     }
 
     // 5. Update local trusted checkpoint
+    const currentCheckpoint = readCheckpoint(ledgerDir);
+    const eventCount = currentCheckpoint && typeof currentCheckpoint.eventCount === 'number'
+      ? currentCheckpoint.eventCount + 1
+      : sequence;
+
     writeCheckpoint(ledgerDir, {
       headSequence: event.sequence,
       headEventId: event.eventId,
       headChainHash: event.chainHash,
-      eventCount: events.length + 1
+      eventCount
     });
 
     return event;

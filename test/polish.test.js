@@ -121,6 +121,9 @@ describe('Product Polish & Visual Hierarchy (test/polish.test.js)', () => {
       assert.ok(!out.includes('\x1b['));
       assert.ok(out.includes('REWIND — Remember what fixed it.'));
       assert.ok(out.includes('CORE WORKFLOW:'));
+      assert.ok(out.includes('rewind export-shared'));
+      assert.ok(out.includes('rewind import-shared'));
+      assert.ok(out.includes('rewind hook'));
       assert.ok(out.includes('SAFETY & TRUST INVARIANTS:'));
     });
   });
