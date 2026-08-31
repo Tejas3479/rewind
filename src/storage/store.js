@@ -800,6 +800,8 @@ export class StorageEngine {
     const { limit, reverse = false } = options;
     const values = Array.from(this.index.values());
 
+    values.sort((a, b) => Number.parseInt(a.id, 10) - Number.parseInt(b.id, 10));
+
     if (reverse) {
       values.reverse();
     }

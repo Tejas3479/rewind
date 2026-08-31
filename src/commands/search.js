@@ -2,6 +2,8 @@ import { MissingArgumentError } from '../errors.js';
 import { searchRecords } from '../storage/search.js';
 import { formatJson } from '../formatter.js';
 import { sanitizeForDisplay } from '../sanitizer.js';
+import { captureSafeEnvironment } from '../environment.js';
+import { readGitMetadata } from '../git.js';
 
 /**
  * Returns formatted colored confidence badge.
@@ -73,6 +75,9 @@ export async function searchCommand({ context }) {
     return 0;
   }
 
+  const safeEnv = captureSafeEnvironment(context.env || process.env);
+  const safeGit = readGitMetadata(process.cwd());
+
   stdout.write(`\n${s.bold(`SEARCH RESULTS for "${sanitizeForDisplay(query)}"`)} ${s.dim(`(${matches.length} candidate(s))`)}\n`);
   stdout.write(`${divider}\n`);
 
@@ -102,7 +107,7 @@ export async function searchCommand({ context }) {
       stdout.write(`  ${s.dim('Negative Memory:'.padEnd(18))} ${s.yellow(`${match.failedAttemptsCount} failed approach(es) on record (see show ${match.id})`)}\n`);
     }
 
-    const staleness = storage.getStalenessReport(rec.id);
+    const staleness = storage.getStalenessReport(rec.id, safeEnv, safeGit);
     if (staleness && staleness.isStale) {
       stdout.write(`  ${s.dim('Context Warning:'.padEnd(18))} ${s.yellow('[STALE EVIDENCE — Environment has diverged since verification]')}\n`);
     }
